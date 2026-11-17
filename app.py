@@ -220,9 +220,9 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
     return {"righe": righe_finali}
 
-# --- CLASSIFICA OPERATORI PER REVENUE (TOTALE €) ---
+# --- CLASSIFICA OPERATORI (SOLO SOMMA COLONNA TOTALE €) ---
 def calcola_classifica_operatori(records_filtrati):
-    """Aggrega tutti gli operatori dai record selezionati e li ordina per Totale (€) decrescente."""
+    """Somma esclusivamente la colonna 'Totale (€)' per ciascun operatore nei mesi selezionati."""
     agg = {}
     for rec in records_filtrati:
         filiale = rec.get("nome_scheda", "")
@@ -239,31 +239,12 @@ def calcola_classifica_operatori(records_filtrati):
                     "Operatore": op,
                     "Filiale": filiale,
                     "Mesi": 0,
-                    "T+KM WI (RA)": 0.0,
-                    "T+KM WI (50%)": 0.0,
-                    "GOLD (€)": 0.0,
-                    "CPP (€)": 0.0,
-                    "RAP (€)": 0.0,
-                    "PAI (€)": 0.0,
-                    "UPSELL (€)": 0.0,
-                    "SEC. GUIDA (€)": 0.0,
-                    "Revenue (€)": 0.0,
-                    "Premio Lordo (€)": 0.0,
+                    "Totale (€)": 0.0,
                 }
             agg[chiave]["Mesi"] += 1
-            agg[chiave]["T+KM WI (RA)"] += to_float(r.get("T+KM WI (RA)")) or 0.0
-            agg[chiave]["T+KM WI (50%)"] += to_float(r.get("T+KM WI (50%)")) or 0.0
-            agg[chiave]["GOLD (€)"] += to_float(r.get("GOLD (€)")) or 0.0
-            agg[chiave]["CPP (€)"] += to_float(r.get("CPP (€)")) or 0.0
-            agg[chiave]["RAP (€)"] += to_float(r.get("RAP (€)")) or 0.0
-            agg[chiave]["PAI (€)"] += to_float(r.get("PAI (€)")) or 0.0
-            agg[chiave]["UPSELL (€)"] += to_float(r.get("UPSELL (€)")) or 0.0
-            agg[chiave]["SEC. GUIDA (€)"] += to_float(r.get("SEC. GUIDA (€)")) or 0.0
-            agg[chiave]["Revenue (€)"] += to_float(r.get("Totale (€)")) or 0.0
-            agg[chiave]["Premio Lordo (€)"] += to_float(r.get("Premio Lordo (€)")) or 0.0
+            agg[chiave]["Totale (€)"] += to_float(r.get("Totale (€)")) or 0.0
 
-    lista_ordinata = sorted(agg.values(), key=lambda x: x["Revenue (€)"], reverse=True)
-    return lista_ordinata
+    return sorted(agg.values(), key=lambda x: x["Totale (€)"], reverse=True)
 
 # --- RENDERING GRAFICO ---
 def genera_tabella_html_unita(df):
@@ -566,7 +547,7 @@ else:
                 st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
 
         with tab5:
-            st.subheader("🏆 Classifica Operatori per Revenue (Totale €)")
+            st.subheader("🏆 Classifica Operatori (Somma Colonna Totale €)")
             admin_client = init_supabase_admin()
             tutti_op = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").execute()
 
@@ -579,7 +560,7 @@ else:
 
                 c_op1, c_op2 = st.columns([2, 1])
                 with c_op1:
-                    mesi_sel_op = st.multiselect("Periodi da considerare:", mesi_op, default=mesi_op, key="op_mesi_sel")
+                    mesi_sel_op = st.multiselect("Mesi da sommare:", mesi_op, default=mesi_op, key="op_mesi_sel")
                 with c_op2:
                     filtro_fil_op = st.selectbox("Filtra per Ufficio:", ["Tutte le Filiali"] + filiali_op, key="op_fil_sel")
 
@@ -592,27 +573,6 @@ else:
                     classifica = calcola_classifica_operatori(rec_filtrati)
 
                     if classifica:
-                        # Metriche riassuntive e Top 3 Podio
-                        tot_rev_rete = sum(x["Revenue (€)"] for x in classifica)
-                        media_rev = tot_rev_rete / len(classifica)
-                        m1, m2, m3 = st.columns(3)
-                        m1.metric("👥 Operatori Attivi", len(classifica))
-                        m2.metric("💰 Revenue Totale", fmt_euro(tot_rev_rete))
-                        m3.metric("📊 Media per Operatore", fmt_euro(media_rev))
-
-                        st.divider()
-                        podio_cols = st.columns(min(3, len(classifica)))
-                        medaglie = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
-                        for idx_p in range(min(3, len(classifica))):
-                            op_p = classifica[idx_p]
-                            podio_cols[idx_p].metric(
-                                label=f"{medaglie[idx_p]} ({op_p['Filiale']})",
-                                value=op_p["Operatore"],
-                                delta=fmt_euro(op_p["Revenue (€)"]),
-                                delta_color="off"
-                            )
-
-                        # Costruzione tabella classifica formattata
                         righe_classifica = []
                         for pos, item in enumerate(classifica, start=1):
                             righe_classifica.append({
@@ -620,16 +580,7 @@ else:
                                 "Operatore": item["Operatore"],
                                 "Filiale": item["Filiale"],
                                 "Mesi": item["Mesi"],
-                                "T+KM WI (RA)": fmt_num(item["T+KM WI (RA)"], 0),
-                                "T+KM WI (50%)": fmt_euro(item["T+KM WI (50%)"]),
-                                "GOLD (€)": fmt_euro(item["GOLD (€)"]),
-                                "CPP (€)": fmt_euro(item["CPP (€)"]),
-                                "RAP (€)": fmt_euro(item["RAP (€)"]),
-                                "PAI (€)": fmt_euro(item["PAI (€)"]),
-                                "UPSELL (€)": fmt_euro(item["UPSELL (€)"]),
-                                "SEC. GUIDA (€)": fmt_euro(item["SEC. GUIDA (€)"]),
-                                "Revenue Totale (€)": fmt_euro(item["Revenue (€)"]),
-                                "Premio Lordo (€)": fmt_euro(item["Premio Lordo (€)"])
+                                "Totale (€)": fmt_euro(item["Totale (€)"])
                             })
 
                         df_classifica = pd.DataFrame(righe_classifica)
@@ -641,7 +592,7 @@ else:
                         st.download_button(
                             "📥 Scarica Classifica Operatori (Excel)",
                             data=buf_op.getvalue(),
-                            file_name="Classifica_Operatori_Revenue.xlsx"
+                            file_name="Classifica_Operatori_Totale.xlsx"
                         )
                     else:
                         st.warning("Nessun operatore trovato per i filtri selezionati.")
