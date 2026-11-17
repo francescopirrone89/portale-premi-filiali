@@ -7,6 +7,7 @@ import io
 # Configurazione pagina
 st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout="wide")
 
+
 # Ordine fisso delle colonne interne
 COLONNE_FILIALE = [
     "Operatore",
