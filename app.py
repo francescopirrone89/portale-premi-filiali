@@ -74,6 +74,17 @@ def parse_foglio_filiale(ws):
     righe_tabella = []
     kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
 
+    # Individua dinamicamente gli indici delle ultime 3 colonne dall'intestazione (riga 2 o 3)
+    col_tot, col_perc, col_premio = 18, 19, 20
+    for c in range(15, ws.max_column + 1):
+        h_txt = (str(ws.cell(row=2, column=c).value or "") + " " + str(ws.cell(row=3, column=c).value or "")).strip().lower()
+        if h_txt == "totale" or (h_txt.startswith("totale") and "complessivo" not in h_txt):
+            col_tot = c
+        elif "operatore" in h_txt or "%" in h_txt:
+            col_perc = c
+        elif "premio" in h_txt or "lordo" in h_txt:
+            col_premio = c
+
     for r in range(4, ws.max_row + 1):
         nome = ws.cell(row=r, column=2).value
         if nome is not None and str(nome).strip() != "":
@@ -99,9 +110,9 @@ def parse_foglio_filiale(ws):
                 "UPSELL (€)": fmt_euro(ws.cell(row=r, column=15).value),
                 "SEC. GUIDA (Q)": fmt_num(ws.cell(row=r, column=16).value, d),
                 "SEC. GUIDA (€)": fmt_euro(ws.cell(row=r, column=17).value),
-                "Totale (€)": fmt_euro(ws.cell(row=r, column=18).value),
-                "% Operatore": fmt_num(ws.cell(row=r, column=19).value, d) + "%",
-                "Premio Lordo (€)": fmt_euro(ws.cell(row=r, column=20).value),
+                "Totale (€)": fmt_euro(ws.cell(row=r, column=col_tot).value),
+                "% Operatore": fmt_num(ws.cell(row=r, column=col_perc).value, d) + "%",
+                "Premio Lordo (€)": fmt_euro(ws.cell(row=r, column=col_premio).value),
             })
             if is_tot:
                 break
