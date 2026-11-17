@@ -32,13 +32,32 @@ if "user" not in st.session_state:
 if "profilo" not in st.session_state:
     st.session_state.profilo = None
 
+# --- CARICAMENTO COMPLETO DA SUPABASE (SUPERA IL LIMITE DI 1000 RIGHE) ---
+def carica_tutti_dati_admin(admin_client, order_desc=False):
+    tutti_record = []
+    batch_size = 1000
+    offset = 0
+    while True:
+        query = admin_client.table("dati_premi").select("id, mese_riferimento, nome_scheda, dati_json")
+        if order_desc:
+            query = query.order("id", desc=True)
+        else:
+            query = query.order("id", desc=False)
+        res = query.range(offset, offset + batch_size - 1).execute()
+        dati = res.data or []
+        tutti_record.extend(dati)
+        if len(dati) < batch_size:
+            break
+        offset += batch_size
+    return tutti_record
+
 # --- FUNZIONI DI FORMATTAZIONE E CONVERSIONE ---
 def to_float(val):
     if val is None or str(val).strip() in ("", "-"):
         return None
     if isinstance(val, (int, float)):
         return float(val)
-    s = str(val).replace("€", "").replace("%", "").strip()
+    s = str(val).replace("€", "").replace("%", "").replace("\xa0", "").strip()
     if "." in s and "," in s:
         s = s.replace(".", "").replace(",", ".")
     elif "," in s:
@@ -68,6 +87,11 @@ def fmt_perc(val, show_sign=False):
         num = num * 100
     sign = "+" if (show_sign and num > 0) else ""
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def normalizza_nome_operatore(nome_raw):
+    """Unifica maiuscole, spazi multipli e anche eventuali inversioni Nome Cognome / Cognome Nome."""
+    parti = [p for p in str(nome_raw).upper().split() if p]
+    return " ".join(parti), " ".join(sorted(parti))
 
 # --- PARSING FOGLIO EXCEL ---
 def parse_foglio_filiale(ws):
@@ -220,12 +244,12 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
     return {"righe": righe_finali}
 
-# --- CLASSIFICA OPERATORI (SOLO SOMMA COLONNA TOTALE €) ---
+# --- CLASSIFICA OPERATORI (SOMMA PURA COLONNA TOTALE € SU TUTTI I RECORD) ---
 def calcola_classifica_operatori(records_filtrati):
-    """Somma esclusivamente la colonna 'Totale (€)' per ciascun operatore su tutte le filiali selezionate."""
     agg = {}
     for rec in records_filtrati:
         filiale = str(rec.get("nome_scheda", "")).strip()
+        mese = str(rec.get("mese_riferimento", "")).strip()
         d_json = rec.get("dati_json", {})
         if not isinstance(d_json, dict) or "righe" not in d_json:
             continue
@@ -233,19 +257,26 @@ def calcola_classifica_operatori(records_filtrati):
             op_raw = str(r.get("Operatore", "")).strip()
             if not op_raw or "totale" in op_raw.lower():
                 continue
-            # Normalizza spazi e maiuscole per unificare lo stesso operatore anche se scritto diversamente
-            op_key = " ".join(op_raw.upper().split())
-            if op_key not in agg:
-                agg[op_key] = {
-                    "Operatore": op_key,
+            nome_visibile, chiave_univoca = normalizza_nome_operatore(op_raw)
+            val_tot = to_float(r.get("Totale (€)")) or 0.0
+            if chiave_univoca not in agg:
+                agg[chiave_univoca] = {
+                    "Operatore": nome_visibile,
                     "Filiali": set(),
                     "Mesi": 0,
                     "Totale (€)": 0.0,
+                    "Dettaglio": []
                 }
             if filiale:
-                agg[op_key]["Filiali"].add(filiale)
-            agg[op_key]["Mesi"] += 1
-            agg[op_key]["Totale (€)"] += to_float(r.get("Totale (€)")) or 0.0
+                agg[chiave_univoca]["Filiali"].add(filiale)
+            agg[chiave_univoca]["Mesi"] += 1
+            agg[chiave_univoca]["Totale (€)"] += val_tot
+            agg[chiave_univoca]["Dettaglio"].append({
+                "Periodo": mese,
+                "Filiale": filiale,
+                "Nome su Excel": op_raw,
+                "Totale (€)": fmt_euro(val_tot)
+            })
 
     risultati = []
     for item in agg.values():
@@ -254,6 +285,7 @@ def calcola_classifica_operatori(records_filtrati):
             "Filiale": ", ".join(sorted(item["Filiali"])),
             "Mesi": item["Mesi"],
             "Totale (€)": item["Totale (€)"],
+            "Dettaglio": item["Dettaglio"]
         })
 
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
@@ -503,15 +535,15 @@ else:
         with tab3:
             st.subheader("Verifica ed elimina dati pubblicati")
             admin_client = init_supabase_admin()
-            tutti = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").order("id", desc=True).execute()
-            if tutti.data:
-                mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti.data]))
+            tutti = carica_tutti_dati_admin(admin_client, order_desc=True)
+            if tutti:
+                mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti]))
                 cm1, cm2 = st.columns([3, 1])
                 mese_sel = cm1.selectbox("Seleziona periodo", mesi)
                 if cm2.button("🗑️ Elimina intero mese", use_container_width=True):
                     admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
                     st.rerun()
-                schede_m = [r for r in tutti.data if r["mese_riferimento"] == mese_sel]
+                schede_m = [r for r in tutti if r["mese_riferimento"] == mese_sel]
                 scheda_sel = st.selectbox("Visualizza scheda", [r["nome_scheda"] for r in schede_m])
                 dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
                 render_scheda_pulita(dati_scelti, mostra_kpi=True)
@@ -521,12 +553,12 @@ else:
         with tab4:
             st.subheader("📊 Gran Totale Annuale per Ufficio")
             admin_client = init_supabase_admin()
-            tutti_ann = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").execute()
+            tutti_ann = carica_tutti_dati_admin(admin_client)
             
-            if tutti_ann.data:
-                mesi_disponibili = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_ann.data]))
+            if tutti_ann:
+                mesi_disponibili = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_ann]))
                 filiali_uniche = sorted(list(set(
-                    r["nome_scheda"] for r in tutti_ann.data
+                    r["nome_scheda"] for r in tutti_ann
                     if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
                 )))
                 
@@ -538,7 +570,7 @@ else:
                 
                 if fil_sel and mesi_scelti_ann:
                     lista_json_fil = [
-                        r["dati_json"] for r in tutti_ann.data
+                        r["dati_json"] for r in tutti_ann
                         if r["nome_scheda"] == fil_sel and r["mese_riferimento"] in mesi_scelti_ann
                     ]
                     gran_tot_res = calcola_gran_totale_filiale(lista_json_fil)
@@ -561,12 +593,12 @@ else:
         with tab5:
             st.subheader("🏆 Classifica Operatori (Somma Colonna Totale €)")
             admin_client = init_supabase_admin()
-            tutti_op = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").execute()
+            tutti_op = carica_tutti_dati_admin(admin_client)
 
-            if tutti_op.data:
-                mesi_op = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_op.data]))
+            if tutti_op:
+                mesi_op = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_op]))
                 filiali_op = sorted(list(set(
-                    r["nome_scheda"] for r in tutti_op.data
+                    r["nome_scheda"] for r in tutti_op
                     if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
                 )))
 
@@ -578,7 +610,7 @@ else:
 
                 if mesi_sel_op:
                     rec_filtrati = [
-                        r for r in tutti_op.data
+                        r for r in tutti_op
                         if r["mese_riferimento"] in mesi_sel_op
                         and (filtro_fil_op == "Tutte le Filiali" or r["nome_scheda"] == filtro_fil_op)
                     ]
@@ -606,6 +638,11 @@ else:
                             data=buf_op.getvalue(),
                             file_name="Classifica_Operatori_Totale.xlsx"
                         )
+
+                        with st.expander("🔍 Verifica dettaglio mensile singolo operatore"):
+                            op_verifica = st.selectbox("Seleziona operatore per verificare i singoli mesi sommati:", [c["Operatore"] for c in classifica])
+                            det_op = next(c["Dettaglio"] for c in classifica if c["Operatore"] == op_verifica)
+                            st.dataframe(pd.DataFrame(det_op), use_container_width=True, hide_index=True)
                     else:
                         st.warning("Nessun operatore trovato per i filtri selezionati.")
             else:
