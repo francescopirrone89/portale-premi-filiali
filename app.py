@@ -9,13 +9,13 @@ st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout=
 # Connessione a Supabase tramite Secrets
 @st.cache_resource
 def init_supabase():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    url = st.secrets["SUPABASE_URL"].strip()
+    key = st.secrets["SUPABASE_KEY"].strip()
     return create_client(url, key)
 
 def init_supabase_admin():
-    url = st.secrets["SUPABASE_URL"]
-    service_key = st.secrets["SUPABASE_SERVICE_KEY"]
+    url = st.secrets["SUPABASE_URL"].strip()
+    service_key = st.secrets["SUPABASE_SERVICE_KEY"].strip()
     return create_client(url, service_key)
 
 supabase = init_supabase()
@@ -35,8 +35,8 @@ def login(email, password):
         prof = supabase.table("profili_filiali").select("*").eq("id", res.user.id).single().execute()
         st.session_state.profilo = prof.data
         st.rerun()
-    except Exception as e:
-        st.error(f"Dettaglio errore: {e}")
+    except Exception:
+        st.error("Credenziali non valide o profilo non configurato.")
 
 # Funzione Logout
 def logout():
@@ -78,7 +78,7 @@ else:
     # ==========================================
     if ruolo == "admin":
         st.title("🛠️ Pannello Amministrazione")
-        tab1, tab2, tab3 = st.tabs(["📤 Carica Excel Mensile", "👥 Gestione Utenti e Filiali", "👀 Anteprima Dati Caricati"])
+        tab1, tab2, tab3 = st.tabs(["📤 Carica Excel Mensile", "👥 Gestione Utenti e Filiali", "👀 Gestione e Anteprima Dati"])
 
         # --- TAB 1: CARICAMENTO EXCEL ---
         with tab1:
@@ -93,19 +93,18 @@ else:
                     try:
                         excel_data = pd.read_excel(uploaded_file, sheet_name=None)
                         schede_elaborate = []
+                        admin_client = init_supabase_admin()
                         
                         # Rimuove eventuali caricamenti precedenti dello stesso mese per evitare duplicati
-                        supabase.table("dati_premi").delete().eq("mese_riferimento", mese_rif).execute()
+                        admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_rif.strip()).execute()
 
                         for nome_scheda, df in excel_data.items():
-                            # Pulisce eventuali righe completamente vuote e converte i valori per il database
                             df = df.dropna(how="all")
                             df = df.fillna("")
-                            # Converte tutti i valori in formato compatibile JSON (gestisce date/numeri)
                             records = df.astype(str).to_dict(orient="records")
                             
-                            supabase.table("dati_premi").insert({
-                                "mese_riferimento": mese_rif,
+                            admin_client.table("dati_premi").insert({
+                                "mese_riferimento": mese_rif.strip(),
                                 "nome_scheda": nome_scheda.strip(),
                                 "dati_json": records
                             }).execute()
@@ -133,20 +132,19 @@ else:
                     if nuova_email and len(nuova_pass) >= 6 and nome_scheda:
                         try:
                             admin_client = init_supabase_admin()
-                            # 1. Crea utente in Auth
                             new_user = admin_client.auth.admin.create_user({
-                                "email": nuova_email,
+                                "email": nuova_email.strip(),
                                 "password": nuova_pass,
                                 "email_confirm": True
                             })
-                            # 2. Associa profilo e scheda
                             admin_client.table("profili_filiali").insert({
                                 "id": new_user.user.id,
-                                "email": nuova_email,
+                                "email": nuova_email.strip(),
                                 "ruolo": nuovo_ruolo,
                                 "nome_scheda_excel": nome_scheda.strip()
                             }).execute()
                             st.success(f"Utente {nuova_email} creato e associato alla scheda '{nome_scheda}'!")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Errore nella creazione utente: {e}")
                     else:
@@ -154,19 +152,60 @@ else:
 
             st.divider()
             st.subheader("Utenti registrati")
-            utenti_res = supabase.table("profili_filiali").select("email, ruolo, nome_scheda_excel").execute()
+            admin_client = init_supabase_admin()
+            utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel").order("email").execute()
+            
             if utenti_res.data:
-                st.dataframe(pd.DataFrame(utenti_res.data), use_container_width=True, hide_index=True)
+                df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel"]]
+                df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata"]
+                st.dataframe(df_utenti, use_container_width=True, hide_index=True)
 
-        # --- TAB 3: ANTEPRIMA DATI ---
+                # Sezione Eliminazione Utente
+                st.markdown("#### 🗑️ Elimina un utente")
+                altri_utenti = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
+                
+                if altri_utenti:
+                    opzioni_utenti = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri_utenti}
+                    col_del1, col_del2 = st.columns([3, 1])
+                    with col_del1:
+                        utente_da_eliminare = st.selectbox("Seleziona l'account da rimuovere", list(opzioni_utenti.keys()), label_visibility="collapsed")
+                    with col_del2:
+                        if st.button("Elimina Utente", type="secondary", use_container_width=True):
+                            try:
+                                uid_target = opzioni_utenti[utente_da_eliminare]
+                                admin_client.auth.admin.delete_user(uid_target)
+                                st.success(f"Account {utente_da_eliminare} eliminato definitivamente.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Errore durante l'eliminazione: {e}")
+                else:
+                    st.caption("Non ci sono altri utenti oltre al tuo account Admin.")
+
+        # --- TAB 3: ANTEPRIMA E GESTIONE DATI ---
         with tab3:
-            st.subheader("Verifica dati pubblicati")
-            tutti_dati = supabase.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").order("id", desc=True).execute()
+            st.subheader("Verifica ed elimina dati pubblicati")
+            admin_client = init_supabase_admin()
+            tutti_dati = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").order("id", desc=True).execute()
+            
             if tutti_dati.data:
                 mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_dati.data]))
-                mese_sel = st.selectbox("Seleziona mese", mesi)
+                
+                col_m1, col_m2 = st.columns([3, 1])
+                with col_m1:
+                    mese_sel = st.selectbox("Seleziona periodo di riferimento", mesi)
+                with col_m2:
+                    st.write("") # Allineamento verticale
+                    st.write("")
+                    if st.button("🗑️ Elimina intero mese", type="secondary", use_container_width=True):
+                        try:
+                            admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
+                            st.success(f"Tutti i dati di '{mese_sel}' sono stati eliminati.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore nell'eliminazione: {e}")
+
                 schede_mese = [r for r in tutti_dati.data if r["mese_riferimento"] == mese_sel]
-                scheda_sel = st.selectbox("Seleziona scheda", [r["nome_scheda"] for r in schede_mese])
+                scheda_sel = st.selectbox("Visualizza anteprima scheda", [r["nome_scheda"] for r in schede_mese])
                 
                 dati_scelti = next(r["dati_json"] for r in schede_mese if r["nome_scheda"] == scheda_sel)
                 st.dataframe(pd.DataFrame(dati_scelti), use_container_width=True, hide_index=True)
@@ -180,7 +219,6 @@ else:
         mia_scheda = profilo["nome_scheda_excel"]
         st.title(f"📊 Riepilogo Premi - {mia_scheda}")
         
-        # Recupera solo i dati della filiale loggata
         dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json, data_caricamento").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
         
         if dati_res.data:
@@ -192,7 +230,6 @@ else:
             
             st.dataframe(df_filiale, use_container_width=True, hide_index=True)
             
-            # Pulsante per scaricare la propria scheda in Excel
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_filiale.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
