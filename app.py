@@ -32,8 +32,9 @@ if "user" not in st.session_state:
 if "profilo" not in st.session_state:
     st.session_state.profilo = None
 
+# --- FUNZIONI DI FORMATTAZIONE E CONVERSIONE ---
 def to_float(val):
-    if val is None or str(val).strip() == "":
+    if val is None or str(val).strip() in ("", "-"):
         return None
     if isinstance(val, (int, float)):
         return float(val)
@@ -59,14 +60,16 @@ def fmt_num(val, dec=2):
         return f"{int(round(num)):,}".replace(",", ".")
     return f"{num:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def fmt_perc(val):
+def fmt_perc(val, show_sign=False):
     num = to_float(val)
     if num is None:
         return "-"
     if abs(num) <= 2.0 and num != 0:
         num = num * 100
-    return f"{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+    sign = "+" if (show_sign and num > 0) else ""
+    return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
+# --- PARSING FOGLIO EXCEL ---
 def parse_foglio_filiale(ws):
     righe_tabella = []
     kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
@@ -103,6 +106,7 @@ def parse_foglio_filiale(ws):
             if is_tot:
                 break
 
+    # Ricerca KPI in basso e lettura completa della riga "vs OBJ" (anche su celle adiacenti)
     for r in range(25, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
             val = str(ws.cell(row=r, column=c).value or "").strip()
@@ -110,13 +114,132 @@ def parse_foglio_filiale(ws):
                 kpi["perc_fatturato"] = fmt_perc(ws.cell(row=r + 1, column=c).value)
                 kpi["risultato_nps"] = fmt_perc(ws.cell(row=r + 1, column=c + 2).value)
                 kpi["premio_lordo"] = fmt_euro(ws.cell(row=r + 1, column=c + 4).value)
-                obj_val = ws.cell(row=r + 2, column=c + 2).value
-                if obj_val is not None and str(obj_val).strip() != "":
-                    kpi["vs_obj"] = str(obj_val).strip()
+                
+                # Scansiona le celle della riga r+2 attorno all'NPS per catturare sia "vs OBJ" che il numero
+                parti_obj = []
+                for col_scan in range(max(1, c), min(ws.max_column + 1, c + 6)):
+                    cell_v = ws.cell(row=r + 2, column=col_scan).value
+                    if cell_v is not None and str(cell_v).strip() != "":
+                        if isinstance(cell_v, (int, float)):
+                            parti_obj.append(fmt_perc(cell_v, show_sign=True))
+                        else:
+                            s_v = str(cell_v).strip()
+                            num_test = to_float(s_v)
+                            if num_test is not None and "obj" not in s_v.lower():
+                                parti_obj.append(fmt_perc(num_test, show_sign=True))
+                            else:
+                                parti_obj.append(s_v)
+                if parti_obj:
+                    kpi["vs_obj"] = " ".join(parti_obj)
                 break
 
     return {"righe": righe_tabella, "kpi": kpi}
 
+# --- AGGREGAZIONE GRAN TOTALE ANNUALE ---
+def calcola_gran_totale_filiale(lista_dati_json):
+    """Somma i dati di più mesi per una singola filiale."""
+    somme_op = {}
+    ordine_op = []
+    tot_premio_kpi = 0.0
+    lista_fatt = []
+    lista_nps = []
+
+    col_numeriche = [c for c in COLONNE_FILIALE if c not in ("Operatore", "% Operatore")]
+
+    for d_json in lista_dati_json:
+        if not isinstance(d_json, dict) or "righe" not in d_json:
+            continue
+        kpi = d_json.get("kpi", {})
+        p_lordo = to_float(kpi.get("premio_lordo"))
+        if p_lordo is not None:
+            tot_premio_kpi += p_lordo
+        p_fatt = to_float(kpi.get("perc_fatturato"))
+        if p_fatt is not None:
+            lista_fatt.append(p_fatt)
+        p_nps = to_float(kpi.get("risultato_nps"))
+        if p_nps is not None:
+            lista_nps.append(p_nps)
+
+        for r in d_json["righe"]:
+            op = str(r.get("Operatore", "")).strip()
+            if not op or "totale" in op.lower():
+                continue
+            if op not in somme_op:
+                somme_op[op] = {c: 0.0 for c in col_numeriche}
+                ordine_op.append(op)
+            for c in col_numeriche:
+                v = to_float(r.get(c))
+                if v is not None:
+                    somme_op[op][c] += v
+
+    if not ordine_op:
+        return None
+
+    grand_tot = {c: sum(somme_op[op][c] for op in ordine_op) for c in col_numeriche}
+    tot_generale_euro = grand_tot["Totale (€)"]
+
+    righe_finali = []
+    for op in ordine_op:
+        s = somme_op[op]
+        perc_op = (s["Totale (€)"] / tot_generale_euro * 100) if tot_generale_euro > 0 else 0.0
+        righe_finali.append({
+            "Operatore": op,
+            "T+KM WI (RA)": fmt_num(s["T+KM WI (RA)"], 0),
+            "T+KM WI (€)": fmt_euro(s["T+KM WI (€)"]),
+            "T+KM WI (50%)": fmt_euro(s["T+KM WI (50%)"]),
+            "GOLD (Q)": fmt_num(s["GOLD (Q)"], 2),
+            "GOLD (€)": fmt_euro(s["GOLD (€)"]),
+            "CPP (Q)": fmt_num(s["CPP (Q)"], 2),
+            "CPP (€)": fmt_euro(s["CPP (€)"]),
+            "RAP (Q)": fmt_num(s["RAP (Q)"], 2),
+            "RAP (€)": fmt_euro(s["RAP (€)"]),
+            "PAI (Q)": fmt_num(s["PAI (Q)"], 2),
+            "PAI (€)": fmt_euro(s["PAI (€)"]),
+            "UPSELL (Q)": fmt_num(s["UPSELL (Q)"], 2),
+            "UPSELL (€)": fmt_euro(s["UPSELL (€)"]),
+            "SEC. GUIDA (Q)": fmt_num(s["SEC. GUIDA (Q)"], 2),
+            "SEC. GUIDA (€)": fmt_euro(s["SEC. GUIDA (€)"]),
+            "Totale (€)": fmt_euro(s["Totale (€)"]),
+            "% Operatore": fmt_num(perc_op, 2) + "%",
+            "Premio Lordo (€)": fmt_euro(s["Premio Lordo (€)"]),
+        })
+
+    righe_finali.append({
+        "Operatore": "Totale complessivo",
+        "T+KM WI (RA)": fmt_num(grand_tot["T+KM WI (RA)"], 0),
+        "T+KM WI (€)": fmt_euro(grand_tot["T+KM WI (€)"]),
+        "T+KM WI (50%)": fmt_euro(grand_tot["T+KM WI (50%)"]),
+        "GOLD (Q)": fmt_num(grand_tot["GOLD (Q)"], 0),
+        "GOLD (€)": fmt_euro(grand_tot["GOLD (€)"]),
+        "CPP (Q)": fmt_num(grand_tot["CPP (Q)"], 0),
+        "CPP (€)": fmt_euro(grand_tot["CPP (€)"]),
+        "RAP (Q)": fmt_num(grand_tot["RAP (Q)"], 0),
+        "RAP (€)": fmt_euro(grand_tot["RAP (€)"]),
+        "PAI (Q)": fmt_num(grand_tot["PAI (Q)"], 0),
+        "PAI (€)": fmt_euro(grand_tot["PAI (€)"]),
+        "UPSELL (Q)": fmt_num(grand_tot["UPSELL (Q)"], 0),
+        "UPSELL (€)": fmt_euro(grand_tot["UPSELL (€)"]),
+        "SEC. GUIDA (Q)": fmt_num(grand_tot["SEC. GUIDA (Q)"], 0),
+        "SEC. GUIDA (€)": fmt_euro(grand_tot["SEC. GUIDA (€)"]),
+        "Totale (€)": fmt_euro(grand_tot["Totale (€)"]),
+        "% Operatore": "100%",
+        "Premio Lordo (€)": fmt_euro(grand_tot["Premio Lordo (€)"]),
+    })
+
+    media_fatt = (sum(lista_fatt) / len(lista_fatt)) if lista_fatt else None
+    media_nps = (sum(lista_nps) / len(lista_nps)) if lista_nps else None
+
+    return {
+        "righe": righe_finali,
+        "kpi": {
+            "perc_fatturato": fmt_perc(media_fatt) if media_fatt is not None else "-",
+            "risultato_nps": fmt_perc(media_nps) if media_nps is not None else "-",
+            "premio_lordo": fmt_euro(tot_premio_kpi if tot_premio_kpi > 0 else grand_tot["Premio Lordo (€)"]),
+            "vs_obj": "Media periodo selezionato"
+        }
+    }
+
+# --- RENDERING GRAFICO ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
@@ -151,14 +274,16 @@ def genera_tabella_html_unita(df):
         html += "</tr>"
     return html + "</tbody></table></div>"
 
-def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
+def render_scheda_pulita(dati_json):
     if isinstance(dati_json, dict) and "righe" in dati_json:
         kpi = dati_json.get("kpi", {})
         if kpi and any(v != "-" for v in kpi.values()):
             c1, c2, c3 = st.columns(3)
             c1.metric("📈 Perc. Fatturato", kpi.get("perc_fatturato", "-"))
-            delta_txt = kpi.get("vs_obj", "")
-            c2.metric("⭐ Risultato NPS", kpi.get("risultato_nps", "-"), delta=delta_txt if delta_txt else None, delta_color="off")
+            delta_txt = str(kpi.get("vs_obj", "")).strip()
+            # Colora il delta automaticamente in base al segno + o -
+            d_color = "normal" if ("+" in delta_txt or "-" in delta_txt) else "off"
+            c2.metric("⭐ Risultato NPS", kpi.get("risultato_nps", "-"), delta=delta_txt if delta_txt else None, delta_color=d_color)
             c3.metric("🏆 Premio Lordo Filiale", kpi.get("premio_lordo", "-"))
             st.divider()
         df = pd.DataFrame(dati_json["righe"])
@@ -171,6 +296,7 @@ def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
         st.dataframe(df, use_container_width=True, hide_index=True)
         return df
 
+# --- AUTH ---
 def login(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -208,9 +334,17 @@ else:
         if st.button("Esci (Logout)", use_container_width=True):
             logout()
 
+    # ==========================================
+    # PANNELLO ADMIN
+    # ==========================================
     if ruolo == "admin":
         st.title("🛠️ Pannello Amministrazione")
-        tab1, tab2, tab3 = st.tabs(["📤 Carica Excel Mensile", "👥 Gestione Utenti e Filiali", "👀 Gestione e Anteprima Dati"])
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📤 Carica Excel Mensile",
+            "👥 Gestione Utenti e Filiali",
+            "👀 Gestione e Anteprima Dati",
+            "📊 Gran Totale Annuale"
+        ])
 
         with tab1:
             st.subheader("Carica il riepilogo mensile")
@@ -331,22 +465,113 @@ else:
                 schede_m = [r for r in tutti.data if r["mese_riferimento"] == mese_sel]
                 scheda_sel = st.selectbox("Visualizza scheda", [r["nome_scheda"] for r in schede_m])
                 dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
-                render_scheda_pulita(dati_scelti, scheda_sel, mese_sel)
+                render_scheda_pulita(dati_scelti)
             else:
                 st.info("Nessun dato ancora caricato.")
+
+        with tab4:
+            st.subheader("📊 Gran Totale Annuale (Riepilogo Cumulato)")
+            st.markdown("Seleziona i mesi da sommare (es. tutto l'anno 2026) per ottenere il cumulato per singola filiale o il riepilogo generale.")
+            admin_client = init_supabase_admin()
+            tutti_ann = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").execute()
+            
+            if tutti_ann.data:
+                mesi_disponibili = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_ann.data]))
+                mesi_scelti_ann = st.multiselect("Mesi inclusi nel Gran Totale:", mesi_disponibili, default=mesi_disponibili)
+                
+                if mesi_scelti_ann:
+                    dati_filtrati = [r for r in tutti_ann.data if r["mese_riferimento"] in mesi_scelti_ann]
+                    filiali_uniche = sorted(list(set(
+                        r["nome_scheda"] for r in dati_filtrati
+                        if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
+                    )))
+                    
+                    modalita_ann = st.radio("Visualizzazione:", ["Dettaglio singola Filiale", "Confronto Generale Tutte le Filiali"], horizontal=True)
+                    
+                    if modalita_ann == "Dettaglio singola Filiale" and filiali_uniche:
+                        fil_sel = st.selectbox("Seleziona la Filiale:", filiali_uniche, key="ann_fil_sel")
+                        lista_json_fil = [r["dati_json"] for r in dati_filtrati if r["nome_scheda"] == fil_sel]
+                        gran_tot_res = calcola_gran_totale_filiale(lista_json_fil)
+                        if gran_tot_res:
+                            df_ann = render_scheda_pulita(gran_tot_res)
+                            if df_ann is not None and not df_ann.empty:
+                                buf_a = io.BytesIO()
+                                with pd.ExcelWriter(buf_a, engine='openpyxl') as writer:
+                                    df_ann.to_excel(writer, index=False, sheet_name=f"Totale_{fil_sel}"[:31])
+                                st.download_button("📥 Scarica Gran Totale Filiale (Excel)", data=buf_a.getvalue(), file_name=f"GranTotale_{fil_sel}.xlsx")
+                    
+                    elif modalita_ann == "Confronto Generale Tutte le Filiali" and filiali_uniche:
+                        riepilogo_rete = []
+                        tot_rete_fatt = 0.0
+                        tot_rete_premio = 0.0
+                        for fil in filiali_uniche:
+                            lista_j = [r["dati_json"] for r in dati_filtrati if r["nome_scheda"] == fil]
+                            gt = calcola_gran_totale_filiale(lista_j)
+                            if gt and gt["righe"]:
+                                riga_tot = gt["righe"][-1]
+                                val_f = to_float(riga_tot["Totale (€)"]) or 0.0
+                                val_p = to_float(riga_tot["Premio Lordo (€)"]) or 0.0
+                                tot_rete_fatt += val_f
+                                tot_rete_premio += val_p
+                                riepilogo_rete.append({
+                                    "Filiale": fil,
+                                    "Mesi Calcolati": len(lista_j),
+                                    "T+KM WI (RA)": riga_tot["T+KM WI (RA)"],
+                                    "GOLD (€)": riga_tot["GOLD (€)"],
+                                    "CPP (€)": riga_tot["CPP (€)"],
+                                    "RAP (€)": riga_tot["RAP (€)"],
+                                    "PAI (€)": riga_tot["PAI (€)"],
+                                    "UPSELL (€)": riga_tot["UPSELL (€)"],
+                                    "SEC. GUIDA (€)": riga_tot["SEC. GUIDA (€)"],
+                                    "Totale Cumulato (€)": riga_tot["Totale (€)"],
+                                    "Premio Lordo Cumulato (€)": riga_tot["Premio Lordo (€)"]
+                                })
+                        if riepilogo_rete:
+                            c_r1, c_r2 = st.columns(2)
+                            c_r1.metric("💰 Totale Cumulato Rete", fmt_euro(tot_rete_fatt))
+                            c_r2.metric("🏆 Totale Premi Lordi Rete", fmt_euro(tot_rete_premio))
+                            df_rete = pd.DataFrame(riepilogo_rete)
+                            st.dataframe(df_rete, use_container_width=True, hide_index=True)
+                            buf_r = io.BytesIO()
+                            with pd.ExcelWriter(buf_r, engine='openpyxl') as writer:
+                                df_rete.to_excel(writer, index=False, sheet_name="Gran_Totale_Rete")
+                            st.download_button("📥 Scarica Gran Totale Rete (Excel)", data=buf_r.getvalue(), file_name="Gran_Totale_Annuale_Rete.xlsx")
+            else:
+                st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
+
+    # ==========================================
+    # PANNELLO FILIALE
+    # ==========================================
     else:
         mia_scheda = profilo["nome_scheda_excel"]
         st.title(f"📊 Riepilogo Premi - {mia_scheda}")
         dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
+        
         if dati_res.data:
-            mesi_disp = [r["mese_riferimento"] for r in dati_res.data]
-            mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disp)
-            rec = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
-            df_esp = render_scheda_pulita(rec["dati_json"], mia_scheda, mese_scelto)
-            if df_esp is not None and not df_esp.empty:
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-                    df_esp.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
-                st.download_button("📥 Scarica questa scheda in Excel", data=buf.getvalue(), file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx")
+            vista_filiale = st.radio("Modalità di consultazione:", ["📅 Dettaglio Mensile", "📊 Gran Totale Annuale"], horizontal=True)
+            
+            if vista_filiale == "📅 Dettaglio Mensile":
+                mesi_disp = [r["mese_riferimento"] for r in dati_res.data]
+                mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disp)
+                rec = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
+                df_esp = render_scheda_pulita(rec["dati_json"])
+                if df_esp is not None and not df_esp.empty:
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                        df_esp.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
+                    st.download_button("📥 Scarica questa scheda in Excel", data=buf.getvalue(), file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx")
+            else:
+                mesi_disp = [r["mese_riferimento"] for r in dati_res.data]
+                mesi_sel_f = st.multiselect("Seleziona i mesi da sommare:", mesi_disp, default=mesi_disp)
+                if mesi_sel_f:
+                    lista_j_f = [r["dati_json"] for r in dati_res.data if r["mese_riferimento"] in mesi_sel_f]
+                    gt_f = calcola_gran_totale_filiale(lista_j_f)
+                    if gt_f:
+                        df_esp_ann = render_scheda_pulita(gt_f)
+                        if df_esp_ann is not None and not df_esp_ann.empty:
+                            buf_fa = io.BytesIO()
+                            with pd.ExcelWriter(buf_fa, engine='openpyxl') as writer:
+                                df_esp_ann.to_excel(writer, index=False, sheet_name=f"Totale_{mia_scheda}"[:31])
+                            st.download_button("📥 Scarica Gran Totale in Excel", data=buf_fa.getvalue(), file_name=f"GranTotale_{mia_scheda}.xlsx")
         else:
             st.info("Non sono ancora presenti dati pubblicati per la tua filiale.")
