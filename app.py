@@ -304,4 +304,46 @@ else:
             if utenti_res.data:
                 df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel"]]
                 df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata"]
-                st.dataframe(df_ut
+                st.dataframe(df_utenti, use_container_width=True, hide_index=True)
+                altri = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
+                if altri:
+                    opzioni = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri}
+                    cd1, cd2 = st.columns([3, 1])
+                    u_del = cd1.selectbox("Rimuovi account", list(opzioni.keys()), label_visibility="collapsed")
+                    if cd2.button("Elimina Utente", use_container_width=True):
+                        admin_client.auth.admin.delete_user(opzioni[u_del])
+                        st.rerun()
+
+        with tab3:
+            st.subheader("Verifica ed elimina dati pubblicati")
+            admin_client = init_supabase_admin()
+            tutti = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").order("id", desc=True).execute()
+            if tutti.data:
+                mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti.data]))
+                cm1, cm2 = st.columns([3, 1])
+                mese_sel = cm1.selectbox("Seleziona periodo", mesi)
+                if cm2.button("🗑️ Elimina intero mese", use_container_width=True):
+                    admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
+                    st.rerun()
+                schede_m = [r for r in tutti.data if r["mese_riferimento"] == mese_sel]
+                scheda_sel = st.selectbox("Visualizza scheda", [r["nome_scheda"] for r in schede_m])
+                dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
+                render_scheda_pulita(dati_scelti, scheda_sel, mese_sel)
+            else:
+                st.info("Nessun dato ancora caricato.")
+    else:
+        mia_scheda = profilo["nome_scheda_excel"]
+        st.title(f"📊 Riepilogo Premi - {mia_scheda}")
+        dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
+        if dati_res.data:
+            mesi_disp = [r["mese_riferimento"] for r in dati_res.data]
+            mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disp)
+            rec = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
+            df_esp = render_scheda_pulita(rec["dati_json"], mia_scheda, mese_scelto)
+            if df_esp is not None and not df_esp.empty:
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                    df_esp.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
+                st.download_button("📥 Scarica questa scheda in Excel", data=buf.getvalue(), file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx")
+        else:
+            st.info("Non sono ancora presenti dati pubblicati per la tua filiale.")
