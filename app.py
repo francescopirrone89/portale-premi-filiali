@@ -7,7 +7,7 @@ import io
 # Configurazione pagina
 st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout="wide")
 
-# Ordine fisso delle colonne per evitare che il database le metta in ordine alfabetico
+# Ordine fisso delle colonne interne
 COLONNE_FILIALE = [
     "Operatore",
     "T+KM WI (RA)", "T+KM WI (€)", "T+KM WI (50%)",
@@ -42,13 +42,11 @@ if "profilo" not in st.session_state:
 
 # --- FUNZIONI DI FORMATTAZIONE E PARSING EXCEL ---
 def to_float(val):
-    """Converte in modo sicuro un valore Excel (numero o stringa) in float."""
     if val is None or str(val).strip() == "":
         return None
     if isinstance(val, (int, float)):
         return float(val)
     s = str(val).replace("€", "").replace("%", "").strip()
-    # Se contiene sia punto che virgola (es. 2.604,56), rimuove il punto delle migliaia e sostituisce la virgola
     if "." in s and "," in s:
         s = s.replace(".", "").replace(",", ".")
     elif "," in s:
@@ -76,19 +74,16 @@ def fmt_perc(val):
     num = to_float(val)
     if num is None:
         return "-"
-    # In Excel le percentuali sono salvate come decimali (es. 0.1192 = 11,92%)
     if abs(num) <= 2.0 and num != 0:
         num = num * 100
     return f"{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def parse_foglio_filiale(ws):
-    """Legge un foglio strutturato come il modello aziendale e restituisce tabella pulita + KPI."""
     righe_tabella = []
     kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
 
-    # 1. Estrazione righe operatori e Totale complessivo (dalla riga 4 in poi)
     for r in range(4, ws.max_row + 1):
-        nome = ws.cell(row=r, column=2).value  # Colonna B
+        nome = ws.cell(row=r, column=2).value
         if nome is not None and str(nome).strip() != "":
             nome_str = str(nome).strip()
             if nome_str.upper() == "TOTALI":
@@ -120,7 +115,6 @@ def parse_foglio_filiale(ws):
             if is_totale:
                 break
 
-    # 2. Estrazione riquadro KPI in basso (cerca "Perc. Fatturato")
     for r in range(25, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
             val = str(ws.cell(row=r, column=c).value or "").strip()
@@ -135,8 +129,114 @@ def parse_foglio_filiale(ws):
 
     return {"righe": righe_tabella, "kpi": kpi}
 
+def genera_tabella_html_unita(df):
+    """Genera una tabella HTML con intestazioni unite su 2 livelli identiche al foglio Excel."""
+    html = """
+    <style>
+    .table-wrapper {
+        overflow-x: auto;
+        border-radius: 8px;
+        border: 1px solid #3a3f4b;
+        margin-top: 8px;
+        margin-bottom: 16px;
+    }
+    .premi-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+    .premi-table th {
+        background-color: #c6e0b4;
+        color: #111111;
+        font-weight: 700;
+        text-align: center;
+        padding: 7px 10px;
+        border: 1px solid #7f9c6b;
+    }
+    .premi-table td {
+        padding: 7px 10px;
+        border: 1px solid #3a3f4b;
+        text-align: right;
+        color: #f0f2f6;
+        background-color: #161920;
+    }
+    .premi-table td.op-cell {
+        text-align: left;
+        font-weight: 600;
+        position: sticky;
+        left: 0;
+        background-color: #1e222b;
+        z-index: 1;
+    }
+    .premi-table td.col-tot {
+        background-color: #1d2633;
+        font-weight: 600;
+    }
+    .premi-table tr.totale-row td {
+        background-color: #d9ead3 !important;
+        color: #111111 !important;
+        font-weight: 700;
+        border-top: 2px solid #5b7a47;
+    }
+    .premi-table tr.totale-row td.premio-cell {
+        background-color: #f4cccc !important;
+    }
+    </style>
+    <div class="table-wrapper">
+    <table class="premi-table">
+        <thead>
+            <tr>
+                <th rowspan="2" style="position: sticky; left: 0; z-index: 2;">Operatore</th>
+                <th colspan="3">T+KM WI</th>
+                <th colspan="2">GOLD</th>
+                <th colspan="2">CPP</th>
+                <th colspan="2">RAP</th>
+                <th colspan="2">PAI</th>
+                <th colspan="2">UPSELL</th>
+                <th colspan="2">SEC. GUIDA</th>
+                <th rowspan="2">Totale</th>
+                <th rowspan="2">%<br>Operatore</th>
+                <th rowspan="2">Premio di<br>risultato Lordo</th>
+            </tr>
+            <tr>
+                <th>RA TOT</th><th>€</th><th>50%</th>
+                <th>QTÀ</th><th>€</th>
+                <th>QTÀ</th><th>€</th>
+                <th>QTÀ</th><th>€</th>
+                <th>QTÀ</th><th>€</th>
+                <th>QTÀ</th><th>€</th>
+                <th>QTÀ</th><th>€</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    for _, row in df.iterrows():
+        is_tot = "totale" in str(row["Operatore"]).lower()
+        tr_class = ' class="totale-row"' if is_tot else ''
+        html += f"<tr{tr_class}>"
+        for col in COLONNE_FILIALE:
+            val = row.get(col, "-")
+            if col == "Operatore":
+                html += f'<td class="op-cell">{val}</td>'
+            elif col == "Totale (€)":
+                html += f'<td class="col-tot">{val}</td>'
+            elif col == "Premio Lordo (€)":
+                html += f'<td class="premio-cell">{val}</td>'
+            else:
+                html += f"<td>{val}</td>"
+        html += "</tr>"
+
+    html += """
+        </tbody>
+    </table>
+    </div>
+    """
+    return html
+
 def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
-    """Visualizza la scheda formattata con ordine colonne fisso e KPI."""
+    """Visualizza la scheda formattata con intestazioni unite e KPI."""
     if isinstance(dati_json, dict) and "righe" in dati_json:
         righe = dati_json["righe"]
         kpi = dati_json.get("kpi", {})
@@ -154,20 +254,9 @@ def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
 
         df = pd.DataFrame(righe)
         if not df.empty:
-            # Forza l'ordine esatto delle colonne come su Excel
             colonne_presenti = [c for c in COLONNE_FILIALE if c in df.columns]
             df = df[colonne_presenti]
-
-            def highlight_totale(row):
-                if "totale" in str(row["Operatore"]).lower():
-                    return ["background-color: #d9ead3; font-weight: bold; color: #111111"] * len(row)
-                return [""] * len(row)
-
-            st.dataframe(
-                df.style.apply(highlight_totale, axis=1),
-                use_container_width=True,
-                hide_index=True
-            )
+            st.markdown(genera_tabella_html_unita(df), unsafe_allow_html=True)
             return df
     else:
         df = pd.DataFrame(dati_json)
@@ -360,110 +449,4 @@ else:
                                 admin_client = init_supabase_admin()
                                 new_user = admin_client.auth.admin.create_user({
                                     "email": nuova_email.strip(),
-                                    "password": nuova_pass,
-                                    "email_confirm": True
-                                })
-                                admin_client.table("profili_filiali").insert({
-                                    "id": new_user.user.id,
-                                    "email": nuova_email.strip(),
-                                    "ruolo": nuovo_ruolo,
-                                    "nome_scheda_excel": nome_scheda.strip()
-                                }).execute()
-                                st.success(f"Utente {nuova_email} creato e associato alla scheda '{nome_scheda}'!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Errore nella creazione utente: {e}")
-                        else:
-                            st.warning("Compila tutti i campi (la password deve avere almeno 6 caratteri).")
-
-            st.divider()
-
-            st.subheader("Utenti registrati")
-            admin_client = init_supabase_admin()
-            utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel").order("email").execute()
-            
-            if utenti_res.data:
-                df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel"]]
-                df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata"]
-                st.dataframe(df_utenti, use_container_width=True, hide_index=True)
-
-                st.markdown("#### 🗑️ Elimina un utente")
-                altri_utenti = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
-                
-                if altri_utenti:
-                    opzioni_utenti = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri_utenti}
-                    col_del1, col_del2 = st.columns([3, 1])
-                    with col_del1:
-                        utente_da_eliminare = st.selectbox("Seleziona l'account da rimuovere", list(opzioni_utenti.keys()), label_visibility="collapsed")
-                    with col_del2:
-                        if st.button("Elimina Utente", type="secondary", use_container_width=True):
-                            try:
-                                uid_target = opzioni_utenti[utente_da_eliminare]
-                                admin_client.auth.admin.delete_user(uid_target)
-                                st.success(f"Account {utente_da_eliminare} eliminato definitivamente.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Errore durante l'eliminazione: {e}")
-                else:
-                    st.caption("Non ci sono altri utenti oltre al tuo account Admin.")
-
-        # --- TAB 3: ANTEPRIMA E GESTIONE DATI ---
-        with tab3:
-            st.subheader("Verifica ed elimina dati pubblicati")
-            admin_client = init_supabase_admin()
-            tutti_dati = admin_client.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").order("id", desc=True).execute()
-            
-            if tutti_dati.data:
-                mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_dati.data]))
-                
-                col_m1, col_m2 = st.columns([3, 1])
-                with col_m1:
-                    mese_sel = st.selectbox("Seleziona periodo di riferimento", mesi)
-                with col_m2:
-                    st.write("")
-                    st.write("")
-                    if st.button("🗑️ Elimina intero mese", type="secondary", use_container_width=True):
-                        try:
-                            admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
-                            st.success(f"Tutti i dati di '{mese_sel}' sono stati eliminati.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Errore nell'eliminazione: {e}")
-
-                schede_mese = [r for r in tutti_dati.data if r["mese_riferimento"] == mese_sel]
-                scheda_sel = st.selectbox("Visualizza anteprima scheda", [r["nome_scheda"] for r in schede_mese])
-                
-                dati_scelti = next(r["dati_json"] for r in schede_mese if r["nome_scheda"] == scheda_sel)
-                render_scheda_pulita(dati_scelti, scheda_sel, mese_sel)
-            else:
-                st.info("Nessun dato ancora caricato.")
-
-    # ==========================================
-    # SEZIONE FILIALE (SOLA LETTURA PROPRIA SCHEDA)
-    # ==========================================
-    else:
-        mia_scheda = profilo["nome_scheda_excel"]
-        st.title(f"📊 Riepilogo Premi - {mia_scheda}")
-        
-        dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json, data_caricamento").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
-        
-        if dati_res.data:
-            mesi_disponibili = [r["mese_riferimento"] for r in dati_res.data]
-            mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disponibili)
-            
-            record_selezionato = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
-            df_esportabile = render_scheda_pulita(record_selezionato["dati_json"], mia_scheda, mese_scelto)
-            
-            if df_esportabile is not None and not df_esportabile.empty:
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_esportabile.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
-                
-                st.download_button(
-                    label="📥 Scarica questa scheda in Excel",
-                    data=buffer.getvalue(),
-                    file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-        else:
-            st.info("Non sono ancora presenti dati pubblicati per la tua filiale.")
+                                    "password":
