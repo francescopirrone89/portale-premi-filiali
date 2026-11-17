@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from supabase import create_client, Client
+import openpyxl
+from supabase import create_client
 import io
 
 # Configurazione pagina
@@ -26,7 +27,150 @@ if "user" not in st.session_state:
 if "profilo" not in st.session_state:
     st.session_state.profilo = None
 
-# Funzione Login
+# --- FUNZIONI DI FORMATTazione E PARSING EXCEL ---
+def fmt_euro(val):
+    if val is None or str(val).strip() == "":
+        return "-"
+    try:
+        num = float(str(val).replace("€", "").replace(".", "").replace(",", ".").strip())
+        return f"{num:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return str(val)
+
+def fmt_num(val, dec=2):
+    if val is None or str(val).strip() == "":
+        return "-"
+    try:
+        num = float(str(val).replace("%", "").replace(",", ".").strip())
+        if dec == 0:
+            return f"{int(round(num)):,}".replace(",", ".")
+        return f"{num:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return str(val)
+
+def fmt_perc(val):
+    if val is None or str(val).strip() == "":
+        return "-"
+    try:
+        s = str(val).strip()
+        if "%" in s:
+            return s
+        num = float(s.replace(",", "."))
+        # In Excel le percentuali sono salvate come decimali (es. 0.1192 = 11,92%)
+        if abs(num) <= 2.0 and num != 0:
+            num = num * 100
+        return f"{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return str(val)
+
+def parse_foglio_filiale(ws):
+    """Legge un foglio strutturato come il modello aziendale e restituisce tabella pulita + KPI."""
+    colonne = [
+        "Operatore",
+        "T+KM WI (RA)", "T+KM WI (€)", "T+KM WI (50%)",
+        "GOLD (Q)", "GOLD (€)",
+        "CPP (Q)", "CPP (€)",
+        "RAP (Q)", "RAP (€)",
+        "PAI (Q)", "PAI (€)",
+        "UPSELL (Q)", "UPSELL (€)",
+        "SEC. GUIDA (Q)", "SEC. GUIDA (€)",
+        "Totale (€)", "% Operatore", "Premio Lordo (€)"
+    ]
+    
+    righe_tabella = []
+    kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
+
+    # 1. Estrazione righe operatori e Totale complessivo (dalla riga 4 in poi)
+    for r in range(4, ws.max_row + 1):
+        nome = ws.cell(row=r, column=2).value  # Colonna B
+        if nome is not None and str(nome).strip() != "":
+            nome_str = str(nome).strip()
+            # Se arriviamo alla sezione TOTALI in basso, interrompiamo la tabella
+            if nome_str.upper() == "TOTALI":
+                break
+            
+            is_totale = "totale" in nome_str.lower()
+            riga_dict = {
+                "Operatore": nome_str,
+                "T+KM WI (RA)": fmt_num(ws.cell(row=r, column=3).value, 0),
+                "T+KM WI (€)": fmt_euro(ws.cell(row=r, column=4).value),
+                "T+KM WI (50%)": fmt_euro(ws.cell(row=r, column=5).value),
+                "GOLD (Q)": fmt_num(ws.cell(row=r, column=6).value, 0 if is_totale else 2),
+                "GOLD (€)": fmt_euro(ws.cell(row=r, column=7).value),
+                "CPP (Q)": fmt_num(ws.cell(row=r, column=8).value, 0 if is_totale else 2),
+                "CPP (€)": fmt_euro(ws.cell(row=r, column=9).value),
+                "RAP (Q)": fmt_num(ws.cell(row=r, column=10).value, 0 if is_totale else 2),
+                "RAP (€)": fmt_euro(ws.cell(row=r, column=11).value),
+                "PAI (Q)": fmt_num(ws.cell(row=r, column=12).value, 0 if is_totale else 2),
+                "PAI (€)": fmt_euro(ws.cell(row=r, column=13).value),
+                "UPSELL (Q)": fmt_num(ws.cell(row=r, column=14).value, 0 if is_totale else 2),
+                "UPSELL (€)": fmt_euro(ws.cell(row=r, column=15).value),
+                "SEC. GUIDA (Q)": fmt_num(ws.cell(row=r, column=16).value, 0 if is_totale else 2),
+                "SEC. GUIDA (€)": fmt_euro(ws.cell(row=r, column=17).value),
+                "Totale (€)": fmt_euro(ws.cell(row=r, column=18).value),
+                "% Operatore": fmt_num(ws.cell(row=r, column=19).value, 0 if is_totale else 2) + "%",
+                "Premio Lordo (€)": fmt_euro(ws.cell(row=r, column=20).value),
+            }
+            righe_tabella.append(riga_dict)
+            if is_totale:
+                break
+
+    # 2. Estrazione riquadro KPI in basso (cerca "Perc. Fatturato")
+    for r in range(25, ws.max_row + 1):
+        for c in range(1, ws.max_column + 1):
+            val = str(ws.cell(row=r, column=c).value or "").strip()
+            if "Perc. Fatturato" in val:
+                kpi["perc_fatturato"] = fmt_perc(ws.cell(row=r + 1, column=c).value)
+                kpi["risultato_nps"] = fmt_perc(ws.cell(row=r + 1, column=c + 2).value)
+                kpi["premio_lordo"] = fmt_euro(ws.cell(row=r + 1, column=c + 4).value)
+                # Cerca eventuale testo "vs OBJ" nella riga sotto
+                obj_val = ws.cell(row=r + 2, column=c + 2).value
+                if obj_val is not None and str(obj_val).strip() != "":
+                    kpi["vs_obj"] = str(obj_val).strip()
+                break
+
+    return {"righe": righe_tabella, "kpi": kpi}
+
+def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
+    """Visualizza la scheda formattata in modo moderno e leggibile."""
+    # Supporta sia il nuovo formato strutturato che eventuali vecchi caricamenti
+    if isinstance(dati_json, dict) and "righe" in dati_json:
+        righe = dati_json["righe"]
+        kpi = dati_json.get("kpi", {})
+        
+        # Mostra i 3 riquadri KPI se presenti
+        if kpi and any(v != "-" for v in kpi.values()):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("📈 Perc. Fatturato", kpi.get("perc_fatturato", "-"))
+            with c2:
+                delta_txt = kpi.get("vs_obj", "")
+                st.metric("⭐ Risultato NPS", kpi.get("risultato_nps", "-"), delta=delta_txt if delta_txt else None, delta_color="off")
+            with c3:
+                st.metric("🏆 Premio Lordo Filiale", kpi.get("premio_lordo", "-"))
+            st.divider()
+
+        df = pd.DataFrame(righe)
+        if not df.empty:
+            # Evidenzia la riga Totale complessivo
+            def highlight_totale(row):
+                if "totale" in str(row["Operatore"]).lower():
+                    return ["background-color: #d9ead3; font-weight: bold; color: #111111"] * len(row)
+                return [""] * len(row)
+
+            st.dataframe(
+                df.style.apply(highlight_totale, axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            return df
+    else:
+        # Fallback per schede non standard (es. scheda Generale)
+        df = pd.DataFrame(dati_json)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        return df
+
+# --- FUNZIONI AUTH ---
 def login(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -37,7 +181,6 @@ def login(email, password):
     except Exception:
         st.error("Credenziali non valide o profilo non configurato.")
 
-# Funzione Logout
 def logout():
     supabase.auth.sign_out()
     st.session_state.user = None
@@ -62,7 +205,6 @@ else:
     profilo = st.session_state.profilo
     ruolo = profilo.get("ruolo", "filiale")
     
-    # Barra laterale
     with st.sidebar:
         st.write(f"👤 **{profilo['email']}**")
         st.write(f"Ruolo: `{ruolo.upper()}`")
@@ -82,7 +224,7 @@ else:
         # --- TAB 1: CARICAMENTO EXCEL ---
         with tab1:
             st.subheader("Carica il riepilogo mensile")
-            st.info("Il sistema dividerà automaticamente tutte le schede presenti nel file Excel in base al loro nome.")
+            st.info("Il sistema pulirà automaticamente le righe vuote, arrotonderà gli importi ed estrarrà i KPI per ogni filiale.")
             
             mese_rif = st.text_input("Mese / Periodo di riferimento (es. Ottobre 2026)", placeholder="Es. Ottobre 2026")
             uploaded_file = st.file_uploader("Seleziona il file Excel (.xlsx)", type=["xlsx"], key="upload_premi")
@@ -90,23 +232,33 @@ else:
             if uploaded_file and mese_rif:
                 if st.button("Elabora e Pubblica Schede", type="primary"):
                     try:
-                        excel_data = pd.read_excel(uploaded_file, sheet_name=None)
+                        file_bytes = uploaded_file.getvalue()
+                        # data_only=True legge i risultati calcolati dalle formule Excel
+                        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
                         schede_elaborate = []
                         admin_client = init_supabase_admin()
                         
                         admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_rif.strip()).execute()
 
-                        for nome_scheda, df in excel_data.items():
-                            df = df.dropna(how="all")
-                            df = df.fillna("")
-                            records = df.astype(str).to_dict(orient="records")
-                            
+                        for sheet_name in wb.sheetnames:
+                            ws = wb[sheet_name]
+                            # Verifica se il foglio segue lo schema filiale (controlla intestazioni riga 2/3)
+                            test_header = str(ws.cell(row=2, column=3).value or "") + str(ws.cell(row=3, column=3).value or "")
+                            if "RA TOT" in test_header or "T+KM" in test_header:
+                                dati_salvare = parse_foglio_filiale(ws)
+                            else:
+                                # Per eventuali schede riepilogative diverse (es. scheda Generale)
+                                df_gen = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+                                df_gen = df_gen.dropna(how="all").dropna(axis=1, how="all").fillna("")
+                                df_gen.columns = [str(c) if not str(c).startswith("Unnamed") else "" for c in df_gen.columns]
+                                dati_salvare = df_gen.astype(str).to_dict(orient="records")
+
                             admin_client.table("dati_premi").insert({
                                 "mese_riferimento": mese_rif.strip(),
-                                "nome_scheda": nome_scheda.strip(),
-                                "dati_json": records
+                                "nome_scheda": sheet_name.strip(),
+                                "dati_json": dati_salvare
                             }).execute()
-                            schede_elaborate.append(nome_scheda.strip())
+                            schede_elaborate.append(sheet_name.strip())
 
                         st.success(f"✅ Pubblicazione completata per **{mese_rif}**!")
                         st.write("Schede divise e salvate:", ", ".join(schede_elaborate))
@@ -115,13 +267,11 @@ else:
 
         # --- TAB 2: GESTIONE ACCOUNT ---
         with tab2:
-            # --- SEZIONE A: CARICAMENTO MASSIVO DA EXCEL ---
             st.subheader("📥 Importazione massiva utenti da Excel")
             st.markdown("Carica un file `.xlsx` con esattamente queste 3 colonne: **`email`**, **`password`** (min. 6 caratteri) e **`nome_scheda_excel`**.")
             
-            # Generatore file template scaricabile
             df_modello = pd.DataFrame([
-                {"email": "filiale.milano@azienda.it", "password": "Password123!", "nome_scheda_excel": "Milano"},
+                {"email": "filiale.milazzo@azienda.it", "password": "Password123!", "nome_scheda_excel": "Milazzo"},
                 {"email": "filiale.roma@azienda.it", "password": "Password456!", "nome_scheda_excel": "Roma"}
             ])
             buf_modello = io.BytesIO()
@@ -140,7 +290,6 @@ else:
                 if st.button("Importa e Crea Tutti gli Utenti", type="primary"):
                     try:
                         df_imp = pd.read_excel(file_utenti)
-                        # Normalizza nomi colonne in minuscolo senza spazi
                         df_imp.columns = [str(c).strip().lower() for c in df_imp.columns]
                         
                         colonne_richieste = {"email", "password", "nome_scheda_excel"}
@@ -193,7 +342,6 @@ else:
 
             st.divider()
 
-            # --- SEZIONE B: CREAZIONE SINGOLO UTENTE ---
             with st.expander("➕ Crea singolo account manualmente", expanded=False):
                 with st.form("nuovo_utente_form"):
                     col_a, col_b = st.columns(2)
@@ -201,7 +349,7 @@ else:
                         nuova_email = st.text_input("Email utente")
                         nuova_pass = st.text_input("Password temporanea (min. 6 caratteri)", type="password")
                     with col_b:
-                        nome_scheda = st.text_input("Nome esatto della scheda Excel (es. Milano)", help="Deve coincidere con il nome del foglio nel file Excel.")
+                        nome_scheda = st.text_input("Nome esatto della scheda Excel (es. Milazzo)", help="Deve coincidere con il nome del foglio nel file Excel.")
                         nuovo_ruolo = st.selectbox("Ruolo", ["filiale", "admin"])
                     
                     crea_btn = st.form_submit_button("Crea Utente")
@@ -229,7 +377,6 @@ else:
 
             st.divider()
 
-            # --- SEZIONE C: ELENCO E ELIMINAZIONE UTENTI ---
             st.subheader("Utenti registrati")
             admin_client = init_supabase_admin()
             utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel").order("email").execute()
@@ -286,7 +433,7 @@ else:
                 scheda_sel = st.selectbox("Visualizza anteprima scheda", [r["nome_scheda"] for r in schede_mese])
                 
                 dati_scelti = next(r["dati_json"] for r in schede_mese if r["nome_scheda"] == scheda_sel)
-                st.dataframe(pd.DataFrame(dati_scelti), use_container_width=True, hide_index=True)
+                render_scheda_pulita(dati_scelti, scheda_sel, mese_sel)
             else:
                 st.info("Nessun dato ancora caricato.")
 
@@ -304,19 +451,18 @@ else:
             mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disponibili)
             
             record_selezionato = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
-            df_filiale = pd.DataFrame(record_selezionato["dati_json"])
+            df_esportabile = render_scheda_pulita(record_selezionato["dati_json"], mia_scheda, mese_scelto)
             
-            st.dataframe(df_filiale, use_container_width=True, hide_index=True)
-            
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_filiale.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
-            
-            st.download_button(
-                label="📥 Scarica questa scheda in Excel",
-                data=buffer.getvalue(),
-                file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            if df_esportabile is not None and not df_esportabile.empty:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_esportabile.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
+                
+                st.download_button(
+                    label="📥 Scarica questa scheda in Excel",
+                    data=buffer.getvalue(),
+                    file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
         else:
             st.info("Non sono ancora presenti dati pubblicati per la tua filiale.")
