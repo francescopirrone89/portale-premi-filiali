@@ -7,6 +7,19 @@ import io
 # Configurazione pagina
 st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout="wide")
 
+# Ordine fisso delle colonne per evitare che il database le metta in ordine alfabetico
+COLONNE_FILIALE = [
+    "Operatore",
+    "T+KM WI (RA)", "T+KM WI (€)", "T+KM WI (50%)",
+    "GOLD (Q)", "GOLD (€)",
+    "CPP (Q)", "CPP (€)",
+    "RAP (Q)", "RAP (€)",
+    "PAI (Q)", "PAI (€)",
+    "UPSELL (Q)", "UPSELL (€)",
+    "SEC. GUIDA (Q)", "SEC. GUIDA (€)",
+    "Totale (€)", "% Operatore", "Premio Lordo (€)"
+]
+
 # Connessione a Supabase tramite Secrets
 @st.cache_resource
 def init_supabase():
@@ -27,56 +40,49 @@ if "user" not in st.session_state:
 if "profilo" not in st.session_state:
     st.session_state.profilo = None
 
-# --- FUNZIONI DI FORMATTazione E PARSING EXCEL ---
-def fmt_euro(val):
+# --- FUNZIONI DI FORMATTAZIONE E PARSING EXCEL ---
+def to_float(val):
+    """Converte in modo sicuro un valore Excel (numero o stringa) in float."""
     if val is None or str(val).strip() == "":
-        return "-"
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).replace("€", "").replace("%", "").strip()
+    # Se contiene sia punto che virgola (es. 2.604,56), rimuove il punto delle migliaia e sostituisce la virgola
+    if "." in s and "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
     try:
-        num = float(str(val).replace("€", "").replace(".", "").replace(",", ".").strip())
-        return f"{num:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        return float(s)
     except Exception:
-        return str(val)
+        return None
+
+def fmt_euro(val):
+    num = to_float(val)
+    if num is None:
+        return "-"
+    return f"{num:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def fmt_num(val, dec=2):
-    if val is None or str(val).strip() == "":
+    num = to_float(val)
+    if num is None:
         return "-"
-    try:
-        num = float(str(val).replace("%", "").replace(",", ".").strip())
-        if dec == 0:
-            return f"{int(round(num)):,}".replace(",", ".")
-        return f"{num:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except Exception:
-        return str(val)
+    if dec == 0:
+        return f"{int(round(num)):,}".replace(",", ".")
+    return f"{num:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def fmt_perc(val):
-    if val is None or str(val).strip() == "":
+    num = to_float(val)
+    if num is None:
         return "-"
-    try:
-        s = str(val).strip()
-        if "%" in s:
-            return s
-        num = float(s.replace(",", "."))
-        # In Excel le percentuali sono salvate come decimali (es. 0.1192 = 11,92%)
-        if abs(num) <= 2.0 and num != 0:
-            num = num * 100
-        return f"{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
-    except Exception:
-        return str(val)
+    # In Excel le percentuali sono salvate come decimali (es. 0.1192 = 11,92%)
+    if abs(num) <= 2.0 and num != 0:
+        num = num * 100
+    return f"{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def parse_foglio_filiale(ws):
     """Legge un foglio strutturato come il modello aziendale e restituisce tabella pulita + KPI."""
-    colonne = [
-        "Operatore",
-        "T+KM WI (RA)", "T+KM WI (€)", "T+KM WI (50%)",
-        "GOLD (Q)", "GOLD (€)",
-        "CPP (Q)", "CPP (€)",
-        "RAP (Q)", "RAP (€)",
-        "PAI (Q)", "PAI (€)",
-        "UPSELL (Q)", "UPSELL (€)",
-        "SEC. GUIDA (Q)", "SEC. GUIDA (€)",
-        "Totale (€)", "% Operatore", "Premio Lordo (€)"
-    ]
-    
     righe_tabella = []
     kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
 
@@ -85,7 +91,6 @@ def parse_foglio_filiale(ws):
         nome = ws.cell(row=r, column=2).value  # Colonna B
         if nome is not None and str(nome).strip() != "":
             nome_str = str(nome).strip()
-            # Se arriviamo alla sezione TOTALI in basso, interrompiamo la tabella
             if nome_str.upper() == "TOTALI":
                 break
             
@@ -123,7 +128,6 @@ def parse_foglio_filiale(ws):
                 kpi["perc_fatturato"] = fmt_perc(ws.cell(row=r + 1, column=c).value)
                 kpi["risultato_nps"] = fmt_perc(ws.cell(row=r + 1, column=c + 2).value)
                 kpi["premio_lordo"] = fmt_euro(ws.cell(row=r + 1, column=c + 4).value)
-                # Cerca eventuale testo "vs OBJ" nella riga sotto
                 obj_val = ws.cell(row=r + 2, column=c + 2).value
                 if obj_val is not None and str(obj_val).strip() != "":
                     kpi["vs_obj"] = str(obj_val).strip()
@@ -132,13 +136,11 @@ def parse_foglio_filiale(ws):
     return {"righe": righe_tabella, "kpi": kpi}
 
 def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
-    """Visualizza la scheda formattata in modo moderno e leggibile."""
-    # Supporta sia il nuovo formato strutturato che eventuali vecchi caricamenti
+    """Visualizza la scheda formattata con ordine colonne fisso e KPI."""
     if isinstance(dati_json, dict) and "righe" in dati_json:
         righe = dati_json["righe"]
         kpi = dati_json.get("kpi", {})
         
-        # Mostra i 3 riquadri KPI se presenti
         if kpi and any(v != "-" for v in kpi.values()):
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -152,7 +154,10 @@ def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
 
         df = pd.DataFrame(righe)
         if not df.empty:
-            # Evidenzia la riga Totale complessivo
+            # Forza l'ordine esatto delle colonne come su Excel
+            colonne_presenti = [c for c in COLONNE_FILIALE if c in df.columns]
+            df = df[colonne_presenti]
+
             def highlight_totale(row):
                 if "totale" in str(row["Operatore"]).lower():
                     return ["background-color: #d9ead3; font-weight: bold; color: #111111"] * len(row)
@@ -165,7 +170,6 @@ def render_scheda_pulita(dati_json, nome_scheda, mese_rif):
             )
             return df
     else:
-        # Fallback per schede non standard (es. scheda Generale)
         df = pd.DataFrame(dati_json)
         st.dataframe(df, use_container_width=True, hide_index=True)
         return df
@@ -233,7 +237,6 @@ else:
                 if st.button("Elabora e Pubblica Schede", type="primary"):
                     try:
                         file_bytes = uploaded_file.getvalue()
-                        # data_only=True legge i risultati calcolati dalle formule Excel
                         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
                         schede_elaborate = []
                         admin_client = init_supabase_admin()
@@ -242,12 +245,10 @@ else:
 
                         for sheet_name in wb.sheetnames:
                             ws = wb[sheet_name]
-                            # Verifica se il foglio segue lo schema filiale (controlla intestazioni riga 2/3)
                             test_header = str(ws.cell(row=2, column=3).value or "") + str(ws.cell(row=3, column=3).value or "")
                             if "RA TOT" in test_header or "T+KM" in test_header:
                                 dati_salvare = parse_foglio_filiale(ws)
                             else:
-                                # Per eventuali schede riepilogative diverse (es. scheda Generale)
                                 df_gen = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
                                 df_gen = df_gen.dropna(how="all").dropna(axis=1, how="all").fillna("")
                                 df_gen.columns = [str(c) if not str(c).startswith("Unnamed") else "" for c in df_gen.columns]
