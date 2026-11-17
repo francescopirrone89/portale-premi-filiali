@@ -1,0 +1,207 @@
+import streamlit as st
+import pandas as pd
+from supabase import create_client, Client
+import io
+
+# Configurazione pagina
+st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout="wide")
+
+# Connessione a Supabase tramite Secrets
+@st.cache_resource
+def init_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+def init_supabase_admin():
+    url = st.secrets["SUPABASE_URL"]
+    service_key = st.secrets["SUPABASE_SERVICE_KEY"]
+    return create_client(url, service_key)
+
+supabase = init_supabase()
+
+# Gestione stato sessione
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "profilo" not in st.session_state:
+    st.session_state.profilo = None
+
+# Funzione Login
+def login(email, password):
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        st.session_state.user = res.user
+        # Recupera profilo e ruolo
+        prof = supabase.table("profili_filiali").select("*").eq("id", res.user.id).single().execute()
+        st.session_state.profilo = prof.data
+        st.rerun()
+    except Exception as e:
+        st.error("Credenziali non valide o profilo non configurato.")
+
+# Funzione Logout
+def logout():
+    supabase.auth.sign_out()
+    st.session_state.user = None
+    st.session_state.profilo = None
+    st.rerun()
+
+# --- SCHERMATA DI LOGIN ---
+if not st.session_state.user:
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.title("📊 Portale Riepilogo Premi")
+        st.markdown("Accedi con le tue credenziali aziendali per visualizzare i dati della tua filiale.")
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Accedi", use_container_width=True)
+            if submitted:
+                login(email, password)
+
+# --- AREA RISERVATA (DOPO IL LOGIN) ---
+else:
+    profilo = st.session_state.profilo
+    ruolo = profilo.get("ruolo", "filiale")
+    
+    # Barra laterale
+    with st.sidebar:
+        st.write(f"👤 **{profilo['email']}**")
+        st.write(f"Ruolo: `{ruolo.upper()}`")
+        if ruolo == "filiale":
+            st.write(f"Filiale: **{profilo['nome_scheda_excel']}**")
+        st.divider()
+        if st.button("Esci (Logout)", use_container_width=True):
+            logout()
+
+    # ==========================================
+    # SEZIONE ADMIN
+    # ==========================================
+    if ruolo == "admin":
+        st.title("🛠️ Pannello Amministrazione")
+        tab1, tab2, tab3 = st.tabs(["📤 Carica Excel Mensile", "👥 Gestione Utenti e Filiali", "👀 Anteprima Dati Caricati"])
+
+        # --- TAB 1: CARICAMENTO EXCEL ---
+        with tab1:
+            st.subheader("Carica il riepilogo mensile")
+            st.info("Il sistema dividerà automaticamente tutte le schede presenti nel file Excel in base al loro nome.")
+            
+            mese_rif = st.text_input("Mese / Periodo di riferimento (es. Ottobre 2026)", placeholder="Es. Ottobre 2026")
+            uploaded_file = st.file_uploader("Seleziona il file Excel (.xlsx)", type=["xlsx"])
+
+            if uploaded_file and mese_rif:
+                if st.button("Elabora e Pubblica Schede", type="primary"):
+                    try:
+                        excel_data = pd.read_excel(uploaded_file, sheet_name=None)
+                        schede_elaborate = []
+                        
+                        # Rimuove eventuali caricamenti precedenti dello stesso mese per evitare duplicati
+                        supabase.table("dati_premi").delete().eq("mese_riferimento", mese_rif).execute()
+
+                        for nome_scheda, df in excel_data.items():
+                            # Pulisce eventuali righe completamente vuote e converte i valori per il database
+                            df = df.dropna(how="all")
+                            df = df.fillna("")
+                            # Converte tutti i valori in formato compatibile JSON (gestisce date/numeri)
+                            records = df.astype(str).to_dict(orient="records")
+                            
+                            supabase.table("dati_premi").insert({
+                                "mese_riferimento": mese_rif,
+                                "nome_scheda": nome_scheda.strip(),
+                                "dati_json": records
+                            }).execute()
+                            schede_elaborate.append(nome_scheda.strip())
+
+                        st.success(f"✅ Pubblicazione completata per **{mese_rif}**!")
+                        st.write("Schede divise e salvate:", ", ".join(schede_elaborate))
+                    except Exception as e:
+                        st.error(f"Errore durante l'elaborazione del file: {e}")
+
+        # --- TAB 2: GESTIONE ACCOUNT ---
+        with tab2:
+            st.subheader("Crea nuovo account Filiale (o nuovo Admin)")
+            with st.form("nuovo_utente_form"):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    nuova_email = st.text_input("Email utente")
+                    nuova_pass = st.text_input("Password temporanea (min. 6 caratteri)", type="password")
+                with col_b:
+                    nome_scheda = st.text_input("Nome esatto della scheda Excel (es. Milano)", help="Deve coincidere con il nome del foglio nel file Excel.")
+                    nuovo_ruolo = st.selectbox("Ruolo", ["filiale", "admin"])
+                
+                crea_btn = st.form_submit_button("Crea Utente")
+                if crea_btn:
+                    if nuova_email and len(nuova_pass) >= 6 and nome_scheda:
+                        try:
+                            admin_client = init_supabase_admin()
+                            # 1. Crea utente in Auth
+                            new_user = admin_client.auth.admin.create_user({
+                                "email": nuova_email,
+                                "password": nuova_pass,
+                                "email_confirm": True
+                            })
+                            # 2. Associa profilo e scheda
+                            admin_client.table("profili_filiali").insert({
+                                "id": new_user.user.id,
+                                "email": nuova_email,
+                                "ruolo": nuovo_ruolo,
+                                "nome_scheda_excel": nome_scheda.strip()
+                            }).execute()
+                            st.success(f"Utente {nuova_email} creato e associato alla scheda '{nome_scheda}'!")
+                        except Exception as e:
+                            st.error(f"Errore nella creazione utente: {e}")
+                    else:
+                        st.warning("Compila tutti i campi (la password deve avere almeno 6 caratteri).")
+
+            st.divider()
+            st.subheader("Utenti registrati")
+            utenti_res = supabase.table("profili_filiali").select("email, ruolo, nome_scheda_excel").execute()
+            if utenti_res.data:
+                st.dataframe(pd.DataFrame(utenti_res.data), use_container_width=True, hide_index=True)
+
+        # --- TAB 3: ANTEPRIMA DATI ---
+        with tab3:
+            st.subheader("Verifica dati pubblicati")
+            tutti_dati = supabase.table("dati_premi").select("mese_riferimento, nome_scheda, dati_json").order("id", desc=True).execute()
+            if tutti_dati.data:
+                mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_dati.data]))
+                mese_sel = st.selectbox("Seleziona mese", mesi)
+                schede_mese = [r for r in tutti_dati.data if r["mese_riferimento"] == mese_sel]
+                scheda_sel = st.selectbox("Seleziona scheda", [r["nome_scheda"] for r in schede_mese])
+                
+                dati_scelti = next(r["dati_json"] for r in schede_mese if r["nome_scheda"] == scheda_sel)
+                st.dataframe(pd.DataFrame(dati_scelti), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nessun dato ancora caricato.")
+
+    # ==========================================
+    # SEZIONE FILIALE (SOLA LETTURA PROPRIA SCHEDA)
+    # ==========================================
+    else:
+        mia_scheda = profilo["nome_scheda_excel"]
+        st.title(f"📊 Riepilogo Premi - {mia_scheda}")
+        
+        # Recupera solo i dati della filiale loggata
+        dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json, data_caricamento").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
+        
+        if dati_res.data:
+            mesi_disponibili = [r["mese_riferimento"] for r in dati_res.data]
+            mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disponibili)
+            
+            record_selezionato = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
+            df_filiale = pd.DataFrame(record_selezionato["dati_json"])
+            
+            st.dataframe(df_filiale, use_container_width=True, hide_index=True)
+            
+            # Pulsante per scaricare la propria scheda in Excel
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_filiale.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
+            
+            st.download_button(
+                label="📥 Scarica questa scheda in Excel",
+                data=buffer.getvalue(),
+                file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("Non sono ancora presenti dati pubblicati per la tua filiale.")
