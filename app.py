@@ -36,7 +36,7 @@ def login(email, password):
         st.session_state.profilo = prof.data
         st.rerun()
     except Exception as e:
-        st.error("Credenziali non valide o profilo non configurato.")
+        st.error(f"Dettaglio errore: {e}")
 
 # Funzione Logout
 def logout():
