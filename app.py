@@ -118,26 +118,29 @@ def parse_foglio_filiale(ws):
     return {"righe": righe_tabella, "kpi": kpi}
 
 def genera_tabella_html_unita(df):
-    html = """<style>
-    .table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #3a3f4b; margin: 8px 0 16px 0; }
-    .premi-table { width: 100%; border-collapse: collapse; font-family: 'Segoe UI', sans-serif; font-size: 13px; white-space: nowrap; }
-    .premi-table th { background-color: #c6e0b4; color: #111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }
-    .premi-table td { padding: 7px 10px; border: 1px solid #3a3f4b; text-align: right; color: #f0f2f6; background-color: #161920; }
-    .premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: #1e222b; z-index: 1; }
-    .premi-table td.col-tot { background-color: #1d2633; font-weight: 600; }
-    .premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }
-    .premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; }
-    </style><div class="table-wrapper"><table class="premi-table"><thead>
-    <tr>
-        <th rowspan="2" style="position:sticky;left:0;z-index:2;">Operatore</th>
-        <th colspan="3">T+KM WI</th><th colspan="2">GOLD</th><th colspan="2">CPP</th>
-        <th colspan="2">RAP</th><th colspan="2">PAI</th><th colspan="2">UPSELL</th><th colspan="2">SEC. GUIDA</th>
-        <th rowspan="2">Totale</th><th rowspan="2">%<br>Operatore</th><th rowspan="2">Premio di<br>risultato Lordo</th>
-    </tr>
-    <tr>
-        <th>RA TOT</th><th>€</th><th>50%</th><th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th>
-        <th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th>
-    </tr></thead><tbody>"""
+    html = (
+        '<style>'
+        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #3a3f4b; margin: 8px 0 16px 0; }'
+        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
+        '.premi-table th { background-color: #c6e0b4; color: #111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
+        '.premi-table td { padding: 7px 10px; border: 1px solid #3a3f4b; text-align: right; color: #f0f2f6; background-color: #161920; }'
+        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: #1e222b; z-index: 1; }'
+        '.premi-table td.col-tot { background-color: #1d2633; font-weight: 600; }'
+        '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
+        '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; }'
+        '</style>'
+        '<div class="table-wrapper"><table class="premi-table"><thead>'
+        '<tr>'
+        '<th rowspan="2" style="position:sticky;left:0;z-index:2;">Operatore</th>'
+        '<th colspan="3">T+KM WI</th><th colspan="2">GOLD</th><th colspan="2">CPP</th>'
+        '<th colspan="2">RAP</th><th colspan="2">PAI</th><th colspan="2">UPSELL</th><th colspan="2">SEC. GUIDA</th>'
+        '<th rowspan="2">Totale</th><th rowspan="2">%<br>Operatore</th><th rowspan="2">Premio di<br>risultato Lordo</th>'
+        '</tr>'
+        '<tr>'
+        '<th>RA TOT</th><th>€</th><th>50%</th><th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th>'
+        '<th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th><th>QTÀ</th><th>€</th>'
+        '</tr></thead><tbody>'
+    )
     for _, row in df.iterrows():
         is_tot = "totale" in str(row["Operatore"]).lower()
         html += f'<tr{" class=\"totale-row\"" if is_tot else ""}>'
