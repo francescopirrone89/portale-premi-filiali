@@ -280,10 +280,39 @@ def render_scheda_pulita(dati_json):
         if kpi and any(v != "-" for v in kpi.values()):
             c1, c2, c3 = st.columns(3)
             c1.metric("📈 Perc. Fatturato", kpi.get("perc_fatturato", "-"))
+            
             delta_txt = str(kpi.get("vs_obj", "")).strip()
-            # Colora il delta automaticamente in base al segno + o -
-            d_color = "normal" if ("+" in delta_txt or "-" in delta_txt) else "off"
-            c2.metric("⭐ Risultato NPS", kpi.get("risultato_nps", "-"), delta=delta_txt if delta_txt else None, delta_color=d_color)
+            nps_val = kpi.get("risultato_nps", "-")
+            
+            # Colore rosso se negativo, verde se positivo, grigio se neutro
+            if "-" in delta_txt:
+                badge_color = "#ff4b4b"
+                bg_badge = "rgba(255, 75, 75, 0.15)"
+                arrow = "▼ "
+            elif "+" in delta_txt:
+                badge_color = "#21c354"
+                bg_badge = "rgba(33, 195, 84, 0.15)"
+                arrow = "▲ "
+            else:
+                badge_color = "#a3a8b8"
+                bg_badge = "rgba(163, 168, 184, 0.15)"
+                arrow = ""
+            
+            badge_html = (
+                f'<span style="display:inline-block; margin-top:4px; padding:2px 8px; border-radius:12px; '
+                f'font-size:13px; font-weight:600; color:{badge_color}; background-color:{bg_badge};">'
+                f'{arrow}{delta_txt}</span>'
+            ) if delta_txt else ""
+
+            c2.markdown(
+                f'<div style="line-height:1.2;">'
+                f'<div style="font-size:14px; color:#fafafa; margin-bottom:4px;">⭐ Risultato NPS</div>'
+                f'<div style="font-size:32px; font-weight:600; color:#ffffff;">{nps_val}</div>'
+                f'{badge_html}'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+            
             c3.metric("🏆 Premio Lordo Filiale", kpi.get("premio_lordo", "-"))
             st.divider()
         df = pd.DataFrame(dati_json["righe"])
