@@ -222,29 +222,41 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
 # --- CLASSIFICA OPERATORI (SOLO SOMMA COLONNA TOTALE €) ---
 def calcola_classifica_operatori(records_filtrati):
-    """Somma esclusivamente la colonna 'Totale (€)' per ciascun operatore nei mesi selezionati."""
+    """Somma esclusivamente la colonna 'Totale (€)' per ciascun operatore su tutte le filiali selezionate."""
     agg = {}
     for rec in records_filtrati:
-        filiale = rec.get("nome_scheda", "")
+        filiale = str(rec.get("nome_scheda", "")).strip()
         d_json = rec.get("dati_json", {})
         if not isinstance(d_json, dict) or "righe" not in d_json:
             continue
         for r in d_json["righe"]:
-            op = str(r.get("Operatore", "")).strip()
-            if not op or "totale" in op.lower():
+            op_raw = str(r.get("Operatore", "")).strip()
+            if not op_raw or "totale" in op_raw.lower():
                 continue
-            chiave = (op, filiale)
-            if chiave not in agg:
-                agg[chiave] = {
-                    "Operatore": op,
-                    "Filiale": filiale,
+            # Normalizza spazi e maiuscole per unificare lo stesso operatore anche se scritto diversamente
+            op_key = " ".join(op_raw.upper().split())
+            if op_key not in agg:
+                agg[op_key] = {
+                    "Operatore": op_key,
+                    "Filiali": set(),
                     "Mesi": 0,
                     "Totale (€)": 0.0,
                 }
-            agg[chiave]["Mesi"] += 1
-            agg[chiave]["Totale (€)"] += to_float(r.get("Totale (€)")) or 0.0
+            if filiale:
+                agg[op_key]["Filiali"].add(filiale)
+            agg[op_key]["Mesi"] += 1
+            agg[op_key]["Totale (€)"] += to_float(r.get("Totale (€)")) or 0.0
 
-    return sorted(agg.values(), key=lambda x: x["Totale (€)"], reverse=True)
+    risultati = []
+    for item in agg.values():
+        risultati.append({
+            "Operatore": item["Operatore"],
+            "Filiale": ", ".join(sorted(item["Filiali"])),
+            "Mesi": item["Mesi"],
+            "Totale (€)": item["Totale (€)"],
+        })
+
+    return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
 # --- RENDERING GRAFICO ---
 def genera_tabella_html_unita(df):
