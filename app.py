@@ -300,11 +300,11 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- RENDERING GRAFICO (ADATTIVO NATIVO CON light-dark() PER STREAMLIT) ---
+# --- RENDERING GRAFICO (ADATTIVO NATIVO CON light-dark() + RESPONSIVE MOBILE) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
+        '.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
         '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
         '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
         '.premi-table td { padding: 7px 10px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
@@ -312,6 +312,11 @@ def genera_tabella_html_unita(df):
         '.premi-table td.col-tot { background-color: light-dark(#eef5e9, #1d2633); font-weight: 600; }'
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
+        '@media (max-width: 768px) {'
+        '  .premi-table { font-size: 11px; }'
+        '  .premi-table th, .premi-table td { padding: 5px 6px; }'
+        '  .premi-table td.op-cell { max-width: 115px; overflow: hidden; text-overflow: ellipsis; }'
+        '}'
         '</style>'
         '<div class="table-wrapper"><table class="premi-table"><thead>'
         '<tr>'
@@ -421,10 +426,53 @@ else:
             logout()
 
     # ==========================================
-    # PANNELLO ADMIN
+    # PANNELLO ADMIN (CON OTTIMIZZAZIONE MOBILE DEDICATA)
     # ==========================================
     if ruolo == "admin":
-        st.title("🛠️ Pannello Amministrazione")
+        st.markdown(
+            """
+            <style>
+            @media (min-width: 769px) {
+                .admin-mobile-bar { display: none !important; }
+            }
+            @media (max-width: 768px) {
+                .block-container {
+                    padding-top: 2.6rem !important;
+                    padding-left: 0.7rem !important;
+                    padding-right: 0.7rem !important;
+                    padding-bottom: 1.5rem !important;
+                }
+                h1 { font-size: 1.45rem !important; margin-bottom: 0.4rem !important; }
+                h2, h3 { font-size: 1.15rem !important; }
+                .stTabs [data-baseweb="tab-list"] {
+                    gap: 4px !important;
+                    overflow-x: auto !important;
+                    flex-wrap: nowrap !important;
+                    -webkit-overflow-scrolling: touch;
+                    padding-bottom: 4px;
+                }
+                .stTabs [data-baseweb="tab"] {
+                    font-size: 12px !important;
+                    padding: 6px 10px !important;
+                    white-space: nowrap !important;
+                }
+                [data-testid="stMetricValue"] { font-size: 1.35rem !important; }
+                [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        col_head, col_mob_out = st.columns([4, 1])
+        with col_head:
+            st.title("🛠️ Pannello Amministrazione")
+        with col_mob_out:
+            st.markdown('<div class="admin-mobile-bar">', unsafe_allow_html=True)
+            if st.button("🚪 Esci", key="mobile_logout_admin", use_container_width=True):
+                logout()
+            st.markdown('</div>', unsafe_allow_html=True)
+
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📤 Carica Excel Mensile",
             "👥 Gestione Utenti e Filiali",
