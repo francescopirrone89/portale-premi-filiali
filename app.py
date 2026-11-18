@@ -85,6 +85,121 @@ def fmt_perc(val, show_sign=False):
     sign = "+" if (show_sign and num > 0) else ""
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
+# --- FORMATTAZIONE INTELLIGENTE PER LA SCHEDA TOTALI ---
+def formatta_tabella_totali_df(df_raw):
+    df = df_raw.copy()
+    if df.empty:
+        return df
+
+    # Se la prima riga contiene le sotto-intestazioni ("Q", "RA TOT", "€", ecc.), le unisce ai nomi colonna e la rimuove
+    prima_riga = [str(v).strip() for v in df.iloc[0].tolist()]
+    if any(x in ("Q", "RA TOT", "€", "50%") for x in prima_riga):
+        nuove_col = []
+        for col, sub in zip(df.columns, prima_riga):
+            c_clean = str(col).strip()
+            if c_clean.startswith("Unnamed") or c_clean == "":
+                c_clean = ""
+            if sub and sub not in ("", "nan", "None"):
+                nuove_col.append(f"{c_clean} ({sub})" if c_clean else sub)
+            else:
+                nuove_col.append(c_clean if c_clean else "Colonna")
+        df.columns = nuove_col
+        df = df.iloc[1:].reset_index(drop=True)
+
+    # Rimuove eventuali colonne completamente vuote
+    df = df.loc[:, [c for c in df.columns if not (df[c].astype(str).str.strip().isin(["", "nan", "None"]).all())]]
+
+    # Identifica la colonna con il nome della Filiale / Stazione (es. Milazzo, Fiumicino) e la mette per prima
+    col_filiale = None
+    for c in df.columns:
+        c_low = str(c).lower()
+        if any(k in c_low for k in ("filiale", "stazione", "ufficio", "punto", "premi ser")):
+            col_filiale = c
+            break
+    if col_filiale is None:
+        for c in reversed(list(df.columns)):
+            vals_test = [str(v).strip() for v in df[c].dropna().tolist() if str(v).strip() not in ("", "-")]
+            if vals_test and sum(1 for v in vals_test if to_float(v) is None and len(v) > 2 and v.upper() != "NO PREMIO") > len(vals_test) * 0.5:
+                col_filiale = c
+                break
+
+    if col_filiale and col_filiale != df.columns[0]:
+        altre_col = [c for c in df.columns if c != col_filiale]
+        df = df[[col_filiale] + altre_col]
+        df = df.rename(columns={col_filiale: "Filiale"})
+
+    # Formatta cella per cella in base al tipo di colonna
+    for c in df.columns:
+        if c == "Filiale" or str(c).lower() == "tipo ufficio":
+            df[c] = df[c].apply(lambda x: "-" if str(x).strip() in ("", "nan", "None") else str(x).strip())
+            continue
+
+        c_low = str(c).lower()
+        is_perc = any(k in c_low for k in ("nps", "aliquota", "incidenza", "abbattim", "%", "obj"))
+        is_euro = any(k in c_low for k in ("premio", "boost", "€", "50%", "fatturato"))
+        is_int  = any(k in c_low for k in ("cod. staz", "ra tot", "(q)", "t+km", "gold", "cpp", "rap", "pai", "upsell", "sec. guida")) and not is_euro
+
+        def formatta_valore(v):
+            s = str(v).strip()
+            if s in ("", "nan", "None", "-"):
+                return "-"
+            num = to_float(s)
+            if num is None:
+                return s
+            if is_perc:
+                return fmt_perc(num)
+            if is_euro:
+                return fmt_euro(num)
+            if is_int:
+                return fmt_num(num, 0)
+            # Default numerico: intero se non ha decimali significativi, altrimenti 2 decimali
+            return fmt_num(num, 0) if abs(num - round(num)) < 1e-6 else fmt_num(num, 2)
+
+        df[c] = df[c].apply(formatta_valore)
+
+    return df
+
+def render_tabella_totali_html(df):
+    cols = list(df.columns)
+    html = (
+        '<style>'
+        '.tot-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
+        '.tot-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
+        '.tot-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 8px 10px; border: 1px solid #7f9c6b; }'
+        '.tot-table td { padding: 7px 10px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
+        '.tot-table td.first-col { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
+        '.tot-table td.center-col { text-align: center; }'
+        '.tot-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
+        '@media (max-width: 768px) {'
+        '  .tot-table { font-size: 11px; }'
+        '  .tot-table th, .tot-table td { padding: 5px 6px; }'
+        '}'
+        '</style>'
+        '<div class="tot-wrapper"><table class="tot-table"><thead><tr>'
+    )
+    for idx, col in enumerate(cols):
+        sticky = ' style="position:sticky;left:0;z-index:2;"' if idx == 0 else ''
+        html += f"<th{sticky}>{col}</th>"
+    html += "</tr></thead><tbody>"
+
+    for _, row in df.iterrows():
+        prima_cella = str(row[cols[0]]).lower()
+        is_tot = "totale" in prima_cella or "complessiv" in prima_cella
+        html += f'<tr{" class=\"totale-row\"" if is_tot else ""}>'
+        for idx, col in enumerate(cols):
+            val = row[col]
+            if idx == 0:
+                cls = ' class="first-col"'
+            elif str(col).lower() in ("tipo ufficio", "cod. staz."):
+                cls = ' class="center-col"'
+            else:
+                cls = ""
+            html += f"<td{cls}>{val}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table></div>"
+    return html
+
 # --- PARSING FOGLIO EXCEL ---
 def parse_foglio_filiale(ws):
     righe_tabella = []
@@ -383,9 +498,10 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
             st.markdown(genera_tabella_html_unita(df), unsafe_allow_html=True)
             return df
     else:
-        df = pd.DataFrame(dati_json)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        return df
+        df_raw = pd.DataFrame(dati_json)
+        df_formattato = formatta_tabella_totali_df(df_raw)
+        st.markdown(render_tabella_totali_html(df_formattato), unsafe_allow_html=True)
+        return df_formattato
 
 # --- AUTH ---
 def login(email, password):
