@@ -555,7 +555,7 @@ else:
                     admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
                     st.rerun()
                 schede_m = [r for r in tutti if r["mese_riferimento"] == mese_sel]
-                scheda_sel = st.selectbox("Visualizza scheda", [r["nome_scheda"] for r in schede_m])
+                scheda_sel = st.selectbox("Visualizza scheda", sorted([r["nome_scheda"] for r in schede_m], key=lambda x: x.lower()))
                 dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
                 render_scheda_pulita(dati_scelti, mostra_kpi=True)
             else:
