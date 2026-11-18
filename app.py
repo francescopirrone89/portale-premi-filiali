@@ -85,6 +85,28 @@ def fmt_perc(val, show_sign=False):
     sign = "+" if (show_sign and num > 0) else ""
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
+def classifica_tipo_colonna_totali(intestazione_completa, sample_fmt=""):
+    h = intestazione_completa.strip().lower()
+    # 1. Prima controlla gli importi in Euro (include anche "Premio definito no NPS", "Boost 1,5%", "Premio qualità")
+    if (
+        "€" in sample_fmt
+        or "€" in h
+        or "50%" in h
+        or any(k in h for k in ("premio", "boost", "qualit", "fatturato"))
+    ):
+        return "euro"
+    # 2. Poi le percentuali
+    if (
+        "%" in sample_fmt
+        or "%" in h
+        or any(k in h for k in ("nps", "aliquota", "incidenza", "abbattim", "obj"))
+    ):
+        return "perc"
+    # 3. Poi gli interi
+    if any(k in h for k in ("cod. staz", "ra tot", "t+km", "gold", "cpp", "rap", "pai", "upsell", "sec. guida", "(q)", "qtà")):
+        return "int"
+    return "auto"
+
 # --- PARSER FEDELE AL FOGLIO EXCEL GENERICO / TOTALI (MANTIENE CELLE UNITE E ORDINE COLONNE) ---
 def parse_foglio_generico_excel(ws, max_col_limit=None):
     max_r = ws.max_row
@@ -161,7 +183,7 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
         if not h1:
             h1 = str(ws.cell(row=r_head_1, column=c).value or "").strip()
         h2 = str(ws.cell(row=r_head_end, column=c).value or "").strip() if has_sub_header else ""
-        full_h = f"{h1} {h2}".strip().lower()
+        full_h = f"{h1} {h2}".strip()
 
         sample_fmt = ""
         for rr in range(r_head_end + 1, min(max_r + 1, r_head_end + 10)):
@@ -170,14 +192,7 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
                 sample_fmt = str(cell_s.number_format)
                 break
 
-        if "%" in sample_fmt or "%" in h2 or any(k in full_h for k in ("nps", "aliquota", "incidenza", "abbattim", "obj", "%")):
-            col_types[c] = "perc"
-        elif "€" in sample_fmt or "€" in h2 or "50%" in h2 or any(k in full_h for k in ("premio", "boost", "fatturato")):
-            col_types[c] = "euro"
-        elif any(k in full_h for k in ("cod. staz", "ra tot", "t+km", "gold", "cpp", "rap", "pai", "upsell", "sec. guida")) or h2 in ("Q", "QTÀ"):
-            col_types[c] = "int"
-        else:
-            col_types[c] = "auto"
+        col_types[c] = classifica_tipo_colonna_totali(full_h, sample_fmt)
 
     body_rows = []
     for r in range(r_head_end + 1, max_r + 1):
@@ -213,12 +228,27 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
                 row_formatted.append(str(val).strip())
 
         body_rows.append({"cells": row_formatted, "is_tot": is_tot_row})
+        if is_tot_row:
+            break
 
     return {"tipo": "tabella_excel_unita", "header_rows": header_rows, "body_rows": body_rows}
 
 def render_tabella_excel_unita_html(dati_tab):
     header_rows = dati_tab.get("header_rows", [])
     body_rows = dati_tab.get("body_rows", [])
+
+    # Ricostruisce i titoli delle colonne per eventuale correzione al volo anche su dati già salvati
+    col_headers = {}
+    for hrow in header_rows:
+        col_ptr = 0
+        for cell in hrow:
+            c_idx = cell.get("col", col_ptr)
+            cs = cell.get("colspan", 1)
+            txt = str(cell.get("text", "")).strip()
+            for offset in range(cs):
+                col_headers[c_idx + offset] = (col_headers.get(c_idx + offset, "") + " " + txt).strip()
+            col_ptr = c_idx + cs
+    ordered_col_keys = sorted(col_headers.keys())
 
     html = (
         '<style>'
@@ -251,9 +281,22 @@ def render_tabella_excel_unita_html(dati_tab):
         celle_pulite = ["" if str(v).strip() == "-" else str(v).strip() for v in brow.get("cells", [])]
         if all(c == "" for c in celle_pulite):
             continue
-        tr_cls = ' class="totale-row"' if brow.get("is_tot") else ""
+
+        prima_cella = celle_pulite[0].lower() if celle_pulite else ""
+        is_tot = brow.get("is_tot") or ("totale" in prima_cella or "complessiv" in prima_cella)
+        tr_cls = ' class="totale-row"' if is_tot else ""
         html += f"<tr{tr_cls}>"
+
         for idx, s_val in enumerate(celle_pulite):
+            # Se la colonna è una di quelle in Euro (es. Boost 1,5%, Premio qualità, Premio definito no NPS)
+            # ma era stata salvata in % o numero semplice, la converte in € al volo
+            if idx < len(ordered_col_keys) and s_val != "":
+                h_txt = col_headers.get(ordered_col_keys[idx], "")
+                if classifica_tipo_colonna_totali(h_txt) == "euro" and "€" not in s_val:
+                    num_test = to_float(s_val)
+                    if num_test is not None:
+                        s_val = fmt_euro(num_test)
+
             if idx == 0:
                 td_cls = ' class="first-col"'
             elif s_val != "" and to_float(s_val) is None:
@@ -262,6 +305,9 @@ def render_tabella_excel_unita_html(dati_tab):
                 td_cls = ""
             html += f"<td{td_cls}>{s_val}</td>"
         html += "</tr>"
+
+        if is_tot:
+            break
 
     html += "</tbody></table></div>"
     return html
