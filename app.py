@@ -300,18 +300,18 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- RENDERING GRAFICO ---
+# --- RENDERING GRAFICO (ADATTIVO AL TEMA CHIARO/SCURO DI STREAMLIT) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #3a3f4b; margin: 8px 0 16px 0; }'
+        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #c5cad3; margin: 8px 0 16px 0; }'
         '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
-        '.premi-table th { background-color: #c6e0b4; color: #111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
-        '.premi-table td { padding: 7px 10px; border: 1px solid #3a3f4b; text-align: right; color: #f0f2f6; background-color: #161920; }'
-        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: #1e222b; z-index: 1; }'
-        '.premi-table td.col-tot { background-color: #1d2633; font-weight: 600; }'
-        '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
-        '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; }'
+        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
+        '.premi-table td { padding: 7px 10px; border: 1px solid #d0d7de; text-align: right; color: var(--text-color, #111111); background-color: var(--background-color, #ffffff); }'
+        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: var(--secondary-background-color, #f6f8fa); color: var(--text-color, #111111); z-index: 1; }'
+        '.premi-table td.col-tot { background-color: rgba(198, 224, 180, 0.22); font-weight: 600; }'
+        '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
+        '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
         '</style>'
         '<div class="table-wrapper"><table class="premi-table"><thead>'
         '<tr>'
@@ -346,16 +346,16 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
             nps_val = kpi.get("risultato_nps", "-")
             
             if "-" in delta_txt:
-                badge_color = "#ff4b4b"
-                bg_badge = "rgba(255, 75, 75, 0.15)"
+                badge_color = "#d93025"
+                bg_badge = "rgba(217, 48, 37, 0.14)"
                 arrow = "▼ "
             elif "+" in delta_txt:
-                badge_color = "#21c354"
-                bg_badge = "rgba(33, 195, 84, 0.15)"
+                badge_color = "#188038"
+                bg_badge = "rgba(24, 128, 56, 0.14)"
                 arrow = "▲ "
             else:
-                badge_color = "#a3a8b8"
-                bg_badge = "rgba(163, 168, 184, 0.15)"
+                badge_color = "#5f6368"
+                bg_badge = "rgba(95, 99, 104, 0.14)"
                 arrow = ""
             
             badge_html = (
@@ -366,8 +366,8 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
 
             c2.markdown(
                 f'<div style="line-height:1.2;">'
-                f'<div style="font-size:14px; color:#fafafa; margin-bottom:4px;">⭐ Risultato NPS</div>'
-                f'<div style="font-size:32px; font-weight:600; color:#ffffff;">{nps_val}</div>'
+                f'<div style="font-size:14px; color:var(--text-color); opacity:0.8; margin-bottom:4px;">⭐ Risultato NPS</div>'
+                f'<div style="font-size:32px; font-weight:600; color:var(--text-color);">{nps_val}</div>'
                 f'{badge_html}'
                 f'</div>',
                 unsafe_allow_html=True
@@ -662,7 +662,7 @@ else:
                 st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
 
         with tab5:
-            st.subheader("🏆 Classifica Totale Operatori")
+            st.subheader("🏆 Classifica Operatori")
             admin_client = init_supabase_admin()
             tutti_op = carica_tutti_dati_admin(admin_client)
 
