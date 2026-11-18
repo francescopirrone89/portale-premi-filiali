@@ -87,7 +87,6 @@ def fmt_perc(val, show_sign=False):
 
 def classifica_tipo_colonna_totali(intestazione_completa, sample_fmt=""):
     h = intestazione_completa.strip().lower()
-    # 1. Prima controlla gli importi in Euro (include anche "Premio definito no NPS", "Boost 1,5%", "Premio qualità")
     if (
         "€" in sample_fmt
         or "€" in h
@@ -95,14 +94,12 @@ def classifica_tipo_colonna_totali(intestazione_completa, sample_fmt=""):
         or any(k in h for k in ("premio", "boost", "qualit", "fatturato"))
     ):
         return "euro"
-    # 2. Poi le percentuali
     if (
         "%" in sample_fmt
         or "%" in h
         or any(k in h for k in ("nps", "aliquota", "incidenza", "abbattim", "obj"))
     ):
         return "perc"
-    # 3. Poi gli interi
     if any(k in h for k in ("cod. staz", "ra tot", "t+km", "gold", "cpp", "rap", "pai", "upsell", "sec. guida", "(q)", "qtà")):
         return "int"
     return "auto"
@@ -237,7 +234,6 @@ def render_tabella_excel_unita_html(dati_tab):
     header_rows = dati_tab.get("header_rows", [])
     body_rows = dati_tab.get("body_rows", [])
 
-    # Ricostruisce i titoli delle colonne per eventuale correzione al volo anche su dati già salvati
     col_headers = {}
     for hrow in header_rows:
         col_ptr = 0
@@ -288,8 +284,6 @@ def render_tabella_excel_unita_html(dati_tab):
         html += f"<tr{tr_cls}>"
 
         for idx, s_val in enumerate(celle_pulite):
-            # Se la colonna è una di quelle in Euro (es. Boost 1,5%, Premio qualità, Premio definito no NPS)
-            # ma era stata salvata in % o numero semplice, la converte in € al volo
             if idx < len(ordered_col_keys) and s_val != "":
                 h_txt = col_headers.get(ordered_col_keys[idx], "")
                 if classifica_tipo_colonna_totali(h_txt) == "euro" and "€" not in s_val:
@@ -619,6 +613,33 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
         st.dataframe(df, use_container_width=True, hide_index=True)
         return df
 
+# --- TABELLA RANGE ALIQUOTE (PER PANNELLO ANTEPRIMA) ---
+def render_tabella_range_aliquote():
+    html = (
+        '<style>'
+        '.range-box { display: flex; justify-content: center; margin-bottom: 6px; }'
+        '.range-table { border-collapse: collapse; font-family: "Segoe UI", Calibri, sans-serif; font-size: 13px; border: 1.5px solid #000000; background-color: #ffffff; }'
+        '.range-table th { background-color: #e2efda; color: #002060; font-weight: 700; text-align: center; padding: 6px 14px; border-bottom: 1.5px solid #000000; letter-spacing: 0.3px; }'
+        '.range-table td { color: #002060; padding: 2px 10px; text-align: center; background-color: #ffffff; line-height: 1.35; }'
+        '.range-table td.col-da { text-align: right; padding-left: 14px; padding-right: 6px; }'
+        '.range-table td.col-a { text-align: right; padding-left: 6px; padding-right: 10px; border-right: 1.5px dotted #000000; }'
+        '.range-table td.col-aliq { text-align: center; padding-left: 12px; padding-right: 14px; }'
+        '.range-table tr:first-child td { padding-top: 5px; }'
+        '.range-table tr:last-child td { padding-bottom: 5px; }'
+        '</style>'
+        '<div class="range-box"><table class="range-table">'
+        '<thead><tr><th colspan="3">RANGE ALIQUOTE</th></tr></thead>'
+        '<tbody>'
+        '<tr><td class="col-da">0,00%</td><td class="col-a">7,99%</td><td class="col-aliq">NO PREMIO</td></tr>'
+        '<tr><td class="col-da">8,00%</td><td class="col-a">14,99%</td><td class="col-aliq">6%</td></tr>'
+        '<tr><td class="col-da">15,00%</td><td class="col-a">19,99%</td><td class="col-aliq">8%</td></tr>'
+        '<tr><td class="col-da">20,00%</td><td class="col-a">24,99%</td><td class="col-aliq">10%</td></tr>'
+        '<tr><td class="col-da">25,00%</td><td class="col-a">29,99%</td><td class="col-aliq">12%</td></tr>'
+        '<tr><td class="col-da">30,00%</td><td class="col-a">100,00%</td><td class="col-aliq">14%</td></tr>'
+        '</tbody></table></div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
 # --- AUTH ---
 def login(email, password):
     try:
@@ -881,7 +902,12 @@ else:
                         st.rerun()
 
         with tab3:
-            st.subheader("Verifica ed elimina dati pubblicati")
+            col_tit_ante, col_range_ante, col_spazio_ante = st.columns([1.4, 1.3, 1.3])
+            with col_tit_ante:
+                st.subheader("Verifica ed elimina dati pubblicati")
+            with col_range_ante:
+                render_tabella_range_aliquote()
+
             admin_client = init_supabase_admin()
             tutti = carica_tutti_dati_admin(admin_client, order_desc=True)
             if tutti:
