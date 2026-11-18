@@ -300,16 +300,29 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- RENDERING GRAFICO (ADATTIVO AL TEMA CHIARO/SCURO DI STREAMLIT) ---
+# --- RENDERING GRAFICO (ADATTIVO REALMENTE AL TEMA CHIARO/SCURO) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #c5cad3; margin: 8px 0 16px 0; }'
+        ':root { color-scheme: light dark; }'
+        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #8c959f66; margin: 8px 0 16px 0; }'
         '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
         '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
-        '.premi-table td { padding: 7px 10px; border: 1px solid #d0d7de; text-align: right; color: var(--text-color, #111111); background-color: var(--background-color, #ffffff); }'
-        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: var(--secondary-background-color, #f6f8fa); color: var(--text-color, #111111); z-index: 1; }'
-        '.premi-table td.col-tot { background-color: rgba(198, 224, 180, 0.22); font-weight: 600; }'
+        
+        '.premi-table td { padding: 7px 10px; border: 1px solid #d0d7de; text-align: right; color: #111111; background-color: #ffffff; }'
+        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: #f6f8fa; color: #111111; z-index: 1; }'
+        '.premi-table td.col-tot { background-color: #eef5e9; font-weight: 600; }'
+        
+        '[data-theme="dark"] .premi-table td, .stApp[data-theme="dark"] .premi-table td { border-color: #3a3f4b; color: #f0f2f6; background-color: #0e1117; }'
+        '[data-theme="dark"] .premi-table td.op-cell, .stApp[data-theme="dark"] .premi-table td.op-cell { background-color: #1e222b; color: #f0f2f6; }'
+        '[data-theme="dark"] .premi-table td.col-tot, .stApp[data-theme="dark"] .premi-table td.col-tot { background-color: #1d2633; }'
+        
+        '@media (prefers-color-scheme: dark) {'
+        '  body:not([data-theme="light"]) .premi-table td { border-color: #3a3f4b; color: #f0f2f6; background-color: #0e1117; }'
+        '  body:not([data-theme="light"]) .premi-table td.op-cell { background-color: #1e222b; color: #f0f2f6; }'
+        '  body:not([data-theme="light"]) .premi-table td.col-tot { background-color: #1d2633; }'
+        '}'
+        
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
         '</style>'
@@ -346,16 +359,16 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
             nps_val = kpi.get("risultato_nps", "-")
             
             if "-" in delta_txt:
-                badge_color = "#d93025"
-                bg_badge = "rgba(217, 48, 37, 0.14)"
+                badge_color = "#ff4b4b"
+                bg_badge = "rgba(255, 75, 75, 0.15)"
                 arrow = "▼ "
             elif "+" in delta_txt:
-                badge_color = "#188038"
-                bg_badge = "rgba(24, 128, 56, 0.14)"
+                badge_color = "#21c354"
+                bg_badge = "rgba(33, 195, 84, 0.15)"
                 arrow = "▲ "
             else:
-                badge_color = "#5f6368"
-                bg_badge = "rgba(95, 99, 104, 0.14)"
+                badge_color = "#808495"
+                bg_badge = "rgba(128, 132, 149, 0.15)"
                 arrow = ""
             
             badge_html = (
@@ -364,14 +377,10 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
                 f'{arrow}{delta_txt}</span>'
             ) if delta_txt else ""
 
-            c2.markdown(
-                f'<div style="line-height:1.2;">'
-                f'<div style="font-size:14px; color:var(--text-color); opacity:0.8; margin-bottom:4px;">⭐ Risultato NPS</div>'
-                f'<div style="font-size:32px; font-weight:600; color:var(--text-color);">{nps_val}</div>'
-                f'{badge_html}'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+            with c2:
+                st.metric("⭐ Risultato NPS", nps_val)
+                if badge_html:
+                    st.markdown(f'<div style="margin-top:-12px;">{badge_html}</div>', unsafe_allow_html=True)
             
             c3.metric("🏆 Premio Lordo Filiale", kpi.get("premio_lordo", "-"))
             st.divider()
