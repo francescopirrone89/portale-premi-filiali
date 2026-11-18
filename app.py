@@ -254,7 +254,6 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
 # --- CLASSIFICA OPERATORI (USA T+KM WI € PIENO + ALTRE VOCI €) ---
 def calcola_classifica_operatori(records_filtrati):
-    """Usa calcola_gran_totale_filiale per ogni filiale e somma T+KM WI (€) pieno + le altre voci €."""
     per_filiale = {}
     for rec in records_filtrati:
         fil = str(rec.get("nome_scheda", "")).strip()
@@ -494,7 +493,13 @@ else:
                                 continue
                             try:
                                 nu = admin_client.auth.admin.create_user({"email": em, "password": pw, "email_confirm": True})
-                                admin_client.table("profili_filiali").insert({"id": nu.user.id, "email": em, "ruolo": "filiale", "nome_scheda_excel": sc}).execute()
+                                admin_client.table("profili_filiali").insert({
+                                    "id": nu.user.id,
+                                    "email": em,
+                                    "ruolo": "filiale",
+                                    "nome_scheda_excel": sc,
+                                    "password_visibile": pw
+                                }).execute()
                                 creati += 1
                             except Exception as ex_u:
                                 errori.append(f"{em}: {ex_u}")
@@ -518,7 +523,13 @@ else:
                             try:
                                 admin_client = init_supabase_admin()
                                 nu = admin_client.auth.admin.create_user({"email": nuova_email.strip(), "password": nuova_pass, "email_confirm": True})
-                                admin_client.table("profili_filiali").insert({"id": nu.user.id, "email": nuova_email.strip(), "ruolo": nuovo_ruolo, "nome_scheda_excel": nome_scheda.strip()}).execute()
+                                admin_client.table("profili_filiali").insert({
+                                    "id": nu.user.id,
+                                    "email": nuova_email.strip(),
+                                    "ruolo": nuovo_ruolo,
+                                    "nome_scheda_excel": nome_scheda.strip(),
+                                    "password_visibile": nuova_pass
+                                }).execute()
                                 st.success(f"Utente {nuova_email} creato!")
                                 st.rerun()
                             except Exception as e:
@@ -527,13 +538,42 @@ else:
                             st.warning("Compila tutti i campi.")
 
             st.divider()
-            st.subheader("Utenti registrati")
+            st.subheader("🔑 Visualizza e Cambia Password Utente")
             admin_client = init_supabase_admin()
-            utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel").order("email").execute()
+            utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel, password_visibile").order("email").execute()
+
             if utenti_res.data:
-                df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel"]]
-                df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata"]
+                opzioni_pw = {f"{u['email']} ({u['nome_scheda_excel']})": u for u in utenti_res.data}
+                col_p1, col_p2, col_p3 = st.columns([2, 1.5, 1])
+                with col_p1:
+                    utente_scelto_label = st.selectbox("Seleziona utente:", list(opzioni_pw.keys()), key="sel_utente_pw")
+                    utente_scelto = opzioni_pw[utente_scelto_label]
+                    pw_attuale = utente_scelto.get("password_visibile") or "Non salvata (imposta una nuova password)"
+                    st.caption(f"Password attuale registrata: **`{pw_attuale}`**")
+                with col_p2:
+                    nuova_pw_reset = st.text_input("Nuova password (min. 6 caratteri)", key="input_nuova_pw")
+                with col_p3:
+                    st.write("")
+                    st.write("")
+                    if st.button("Aggiorna Password", type="primary", use_container_width=True):
+                        if len(nuova_pw_reset.strip()) >= 6:
+                            try:
+                                admin_client.auth.admin.update_user_by_id(utente_scelto["id"], {"password": nuova_pw_reset.strip()})
+                                admin_client.table("profili_filiali").update({"password_visibile": nuova_pw_reset.strip()}).eq("id", utente_scelto["id"]).execute()
+                                st.success(f"✅ Password aggiornata per {utente_scelto['email']}!")
+                                st.rerun()
+                            except Exception as e_pw:
+                                st.error(f"Errore aggiornamento password: {e_pw}")
+                        else:
+                            st.warning("La password deve avere almeno 6 caratteri.")
+
+                st.divider()
+                st.subheader("Utenti registrati")
+                df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel", "password_visibile"]]
+                df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata", "Password"]
+                df_utenti["Password"] = df_utenti["Password"].fillna("-")
                 st.dataframe(df_utenti, use_container_width=True, hide_index=True)
+
                 altri = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
                 if altri:
                     opzioni = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri}
@@ -571,7 +611,7 @@ else:
                 filiali_uniche = sorted(list(set(
                     r["nome_scheda"] for r in tutti_ann
                     if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
-                )))
+                )), key=lambda x: x.lower())
                 
                 col_f1, col_f2 = st.columns([1, 2])
                 with col_f1:
@@ -611,7 +651,7 @@ else:
                 filiali_op = sorted(list(set(
                     r["nome_scheda"] for r in tutti_op
                     if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
-                )))
+                )), key=lambda x: x.lower())
 
                 c_op1, c_op2 = st.columns([2, 1])
                 with c_op1:
