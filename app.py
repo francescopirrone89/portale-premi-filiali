@@ -39,10 +39,7 @@ def carica_tutti_dati_admin(admin_client, order_desc=False):
     offset = 0
     while True:
         query = admin_client.table("dati_premi").select("id, mese_riferimento, nome_scheda, dati_json")
-        if order_desc:
-            query = query.order("id", desc=True)
-        else:
-            query = query.order("id", desc=False)
+        query = query.order("id", desc=order_desc)
         res = query.range(offset, offset + batch_size - 1).execute()
         dati = res.data or []
         tutti_record.extend(dati)
@@ -87,11 +84,6 @@ def fmt_perc(val, show_sign=False):
         num = num * 100
     sign = "+" if (show_sign and num > 0) else ""
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
-
-def normalizza_nome_operatore(nome_raw):
-    """Unifica maiuscole, spazi multipli e anche eventuali inversioni Nome Cognome / Cognome Nome."""
-    parti = [p for p in str(nome_raw).upper().split() if p]
-    return " ".join(parti), " ".join(sorted(parti))
 
 # --- PARSING FOGLIO EXCEL ---
 def parse_foglio_filiale(ws):
@@ -244,50 +236,45 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
     return {"righe": righe_finali}
 
-# --- CLASSIFICA OPERATORI (SOMMA PURA COLONNA TOTALE € SU TUTTI I RECORD) ---
+# --- CLASSIFICA OPERATORI (USA ESATTAMENTE LA STESSA LOGICA DEL GRAN TOTALE) ---
 def calcola_classifica_operatori(records_filtrati):
-    agg = {}
+    """Usa calcola_gran_totale_filiale per ogni filiale ed estrae solo la colonna 'Totale (€)'."""
+    per_filiale = {}
     for rec in records_filtrati:
-        filiale = str(rec.get("nome_scheda", "")).strip()
-        mese = str(rec.get("mese_riferimento", "")).strip()
+        fil = str(rec.get("nome_scheda", "")).strip()
         d_json = rec.get("dati_json", {})
-        if not isinstance(d_json, dict) or "righe" not in d_json:
+        if isinstance(d_json, dict) and "righe" in d_json:
+            per_filiale.setdefault(fil, []).append(d_json)
+
+    agg_op = {}
+    for fil, lista_json in per_filiale.items():
+        gt = calcola_gran_totale_filiale(lista_json)
+        if not gt or "righe" not in gt:
             continue
-        for r in d_json["righe"]:
-            op_raw = str(r.get("Operatore", "")).strip()
-            if not op_raw or "totale" in op_raw.lower():
+        for riga in gt["righe"]:
+            op = str(riga.get("Operatore", "")).strip()
+            if not op or "totale" in op.lower():
                 continue
-            nome_visibile, chiave_univoca = normalizza_nome_operatore(op_raw)
-            val_tot = to_float(r.get("Totale (€)")) or 0.0
-            if chiave_univoca not in agg:
-                agg[chiave_univoca] = {
-                    "Operatore": nome_visibile,
+            val_tot = to_float(riga.get("Totale (€)")) or 0.0
+            chiave = " ".join(op.upper().split())
+            if chiave not in agg_op:
+                agg_op[chiave] = {
+                    "Operatore": op,
                     "Filiali": set(),
-                    "Mesi": 0,
-                    "Totale (€)": 0.0,
-                    "Dettaglio": []
+                    "Totale (€)": 0.0
                 }
-            if filiale:
-                agg[chiave_univoca]["Filiali"].add(filiale)
-            agg[chiave_univoca]["Mesi"] += 1
-            agg[chiave_univoca]["Totale (€)"] += val_tot
-            agg[chiave_univoca]["Dettaglio"].append({
-                "Periodo": mese,
-                "Filiale": filiale,
-                "Nome su Excel": op_raw,
-                "Totale (€)": fmt_euro(val_tot)
-            })
+            if fil:
+                agg_op[chiave]["Filiali"].add(fil)
+            agg_op[chiave]["Totale (€)"] += val_tot
 
-    risultati = []
-    for item in agg.values():
-        risultati.append({
-            "Operatore": item["Operatore"],
-            "Filiale": ", ".join(sorted(item["Filiali"])),
-            "Mesi": item["Mesi"],
-            "Totale (€)": item["Totale (€)"],
-            "Dettaglio": item["Dettaglio"]
-        })
-
+    risultati = [
+        {
+            "Operatore": v["Operatore"],
+            "Filiale": ", ".join(sorted(v["Filiali"])),
+            "Totale (€)": v["Totale (€)"]
+        }
+        for v in agg_op.values()
+    ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
 # --- RENDERING GRAFICO ---
@@ -617,15 +604,15 @@ else:
                     classifica = calcola_classifica_operatori(rec_filtrati)
 
                     if classifica:
-                        righe_classifica = []
-                        for pos, item in enumerate(classifica, start=1):
-                            righe_classifica.append({
+                        righe_classifica = [
+                            {
                                 "Pos.": f"{pos}°",
                                 "Operatore": item["Operatore"],
                                 "Filiale": item["Filiale"],
-                                "Mesi": item["Mesi"],
                                 "Totale (€)": fmt_euro(item["Totale (€)"])
-                            })
+                            }
+                            for pos, item in enumerate(classifica, start=1)
+                        ]
 
                         df_classifica = pd.DataFrame(righe_classifica)
                         st.dataframe(df_classifica, use_container_width=True, hide_index=True)
@@ -638,11 +625,6 @@ else:
                             data=buf_op.getvalue(),
                             file_name="Classifica_Operatori_Totale.xlsx"
                         )
-
-                        with st.expander("🔍 Verifica dettaglio mensile singolo operatore"):
-                            op_verifica = st.selectbox("Seleziona operatore per verificare i singoli mesi sommati:", [c["Operatore"] for c in classifica])
-                            det_op = next(c["Dettaglio"] for c in classifica if c["Operatore"] == op_verifica)
-                            st.dataframe(pd.DataFrame(det_op), use_container_width=True, hide_index=True)
                     else:
                         st.warning("Nessun operatore trovato per i filtri selezionati.")
             else:
