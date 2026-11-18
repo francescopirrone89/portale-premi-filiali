@@ -476,7 +476,7 @@ else:
             st.download_button("📄 Scarica file Excel di esempio", data=buf_modello.getvalue(), file_name="modello_importazione_utenti.xlsx")
 
             file_utenti = st.file_uploader("Carica l'elenco utenti (.xlsx)", type=["xlsx"], key="upload_utenti")
-            if file_utenti and st.button("Importa e Crea Tutti gli Utenti", type="primary"):
+            if file_utenti and st.button("Importa e Aggiorna Tutti gli Utenti", type="primary"):
                 try:
                     df_imp = pd.read_excel(file_utenti)
                     df_imp.columns = [str(c).strip().lower() for c in df_imp.columns]
@@ -485,26 +485,39 @@ else:
                     else:
                         df_imp = df_imp.dropna(subset=["email", "password", "nome_scheda_excel"])
                         admin_client = init_supabase_admin()
-                        creati, errori = 0, []
+                        esistenti_res = admin_client.table("profili_filiali").select("id, email").execute()
+                        mappa_esistenti = {u["email"].strip().lower(): u["id"] for u in (esistenti_res.data or [])}
+                        
+                        creati, aggiornati, errori = 0, 0, []
                         for _, row in df_imp.iterrows():
                             em, pw, sc = str(row["email"]).strip(), str(row["password"]).strip(), str(row["nome_scheda_excel"]).strip()
                             if len(pw) < 6:
                                 errori.append(f"{em}: password < 6 caratteri")
                                 continue
                             try:
-                                nu = admin_client.auth.admin.create_user({"email": em, "password": pw, "email_confirm": True})
-                                admin_client.table("profili_filiali").insert({
-                                    "id": nu.user.id,
-                                    "email": em,
-                                    "ruolo": "filiale",
-                                    "nome_scheda_excel": sc,
-                                    "password_visibile": pw
-                                }).execute()
-                                creati += 1
+                                if em.lower() in mappa_esistenti:
+                                    uid = mappa_esistenti[em.lower()]
+                                    admin_client.auth.admin.update_user_by_id(uid, {"password": pw})
+                                    admin_client.table("profili_filiali").update({
+                                        "nome_scheda_excel": sc,
+                                        "password_visibile": pw
+                                    }).eq("id", uid).execute()
+                                    aggiornati += 1
+                                else:
+                                    nu = admin_client.auth.admin.create_user({"email": em, "password": pw, "email_confirm": True})
+                                    admin_client.table("profili_filiali").insert({
+                                        "id": nu.user.id,
+                                        "email": em,
+                                        "ruolo": "filiale",
+                                        "nome_scheda_excel": sc,
+                                        "password_visibile": pw
+                                    }).execute()
+                                    creati += 1
                             except Exception as ex_u:
                                 errori.append(f"{em}: {ex_u}")
-                        if creati > 0:
-                            st.success(f"✅ {creati} utenti creati!")
+                        if creati > 0 or aggiornati > 0:
+                            st.success(f"✅ {creati} utenti creati, {aggiornati} utenti aggiornati!")
+                            st.rerun()
                         for err in errori:
                             st.warning(err)
                 except Exception as e:
