@@ -66,12 +66,12 @@ def to_float(val):
 
 def fmt_euro(val):
     num = to_float(val)
-    return "-" if num is None else f"{num:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+    return "" if num is None else f"{num:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def fmt_num(val, dec=2):
     num = to_float(val)
     if num is None:
-        return "-"
+        return ""
     if dec == 0:
         return f"{int(round(num)):,}".replace(",", ".")
     return f"{num:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -79,7 +79,7 @@ def fmt_num(val, dec=2):
 def fmt_perc(val, show_sign=False):
     num = to_float(val)
     if num is None:
-        return "-"
+        return ""
     if abs(num) <= 2.0 and num != 0:
         num = num * 100
     sign = "+" if (show_sign and num > 0) else ""
@@ -90,7 +90,6 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
     max_r = ws.max_row
     max_c = min(ws.max_column, max_col_limit) if max_col_limit else ws.max_column
 
-    # Trova le colonne effettivamente utilizzate entro il limite
     col_valide = []
     for c in range(1, max_c + 1):
         ha_valori = any(ws.cell(row=r, column=c).value is not None and str(ws.cell(row=r, column=c).value).strip() != "" for r in range(1, max_r + 1))
@@ -100,14 +99,12 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
         return []
     c_start, c_end = min(col_valide), max(col_valide)
 
-    # Trova la prima riga non vuota (inizio intestazione)
     r_head_1 = 1
     for r in range(1, max_r + 1):
         if any(ws.cell(row=r, column=c).value is not None and str(ws.cell(row=r, column=c).value).strip() != "" for c in range(c_start, c_end + 1)):
             r_head_1 = r
             break
 
-    # Verifica se esiste una seconda riga di intestazione (sotto-intestazioni o celle unite verticalmente)
     has_sub_header = False
     if r_head_1 + 1 <= max_r:
         for rng in ws.merged_cells.ranges:
@@ -121,7 +118,6 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
 
     r_head_end = r_head_1 + 1 if has_sub_header else r_head_1
 
-    # Mappa le celle unite dell'intestazione (tagliate a c_end se eccedono)
     merged_map = {}
     skip_cells = set()
     for rng in ws.merged_cells.ranges:
@@ -136,7 +132,6 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
                         if (rr, cc) != (rng.min_row, c0):
                             skip_cells.add((rr, cc))
 
-    # Se c'è doppia riga intestazione, unisce verticalmente in automatico le celle singole sopra una cella vuota
     if has_sub_header:
         for c in range(c_start, c_end + 1):
             if (r_head_1, c) not in merged_map and (r_head_1, c) not in skip_cells:
@@ -145,7 +140,6 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
                     merged_map[(r_head_1, c)] = (2, 1)
                     skip_cells.add((r_head_end, c))
 
-    # Costruisce le righe di intestazione HTML
     header_rows = []
     for r in range(r_head_1, r_head_end + 1):
         row_cells = []
@@ -157,7 +151,6 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
             row_cells.append({"text": val, "rowspan": rs, "colspan": cs, "col": c})
         header_rows.append(row_cells)
 
-    # Identifica il tipo di formato di ciascuna colonna (leggendo intestazioni + number_format Excel)
     col_types = {}
     for c in range(c_start, c_end + 1):
         h1 = ""
@@ -186,11 +179,10 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
         else:
             col_types[c] = "auto"
 
-    # Estrae e formatta le righe dati
     body_rows = []
     for r in range(r_head_end + 1, max_r + 1):
         raw_vals = [ws.cell(row=r, column=c).value for c in range(c_start, c_end + 1)]
-        if all(v is None or str(v).strip() == "" for v in raw_vals):
+        if all(v is None or str(v).strip() in ("", "-") for v in raw_vals):
             continue
 
         row_formatted = []
@@ -198,8 +190,8 @@ def parse_foglio_generico_excel(ws, max_col_limit=None):
         for c in range(c_start, c_end + 1):
             cell = ws.cell(row=r, column=c)
             val = cell.value
-            if val is None or str(val).strip() == "":
-                row_formatted.append("-")
+            if val is None or str(val).strip() in ("", "-"):
+                row_formatted.append("")
                 continue
 
             if isinstance(val, str):
@@ -256,13 +248,15 @@ def render_tabella_excel_unita_html(dati_tab):
 
     html += "</thead><tbody>"
     for brow in body_rows:
+        celle_pulite = ["" if str(v).strip() == "-" else str(v).strip() for v in brow.get("cells", [])]
+        if all(c == "" for c in celle_pulite):
+            continue
         tr_cls = ' class="totale-row"' if brow.get("is_tot") else ""
         html += f"<tr{tr_cls}>"
-        for idx, val in enumerate(brow.get("cells", [])):
-            s_val = str(val)
+        for idx, s_val in enumerate(celle_pulite):
             if idx == 0:
                 td_cls = ' class="first-col"'
-            elif to_float(s_val) is None and s_val != "-":
+            elif s_val != "" and to_float(s_val) is None:
                 td_cls = ' class="text-col"'
             else:
                 td_cls = ""
@@ -303,6 +297,7 @@ def parse_foglio_filiale(ws):
             v_sec    = to_float(ws.cell(row=r, column=17).value) or 0.0
 
             totale_calcolato = v_tkm_50 + v_gold + v_cpp + v_rap + v_pai + v_upsell + v_sec
+            perc_op_fmt = fmt_num(ws.cell(row=r, column=col_perc).value, d)
 
             righe_tabella.append({
                 "Operatore": nome_str,
@@ -322,7 +317,7 @@ def parse_foglio_filiale(ws):
                 "SEC. GUIDA (Q)": fmt_num(ws.cell(row=r, column=16).value, d),
                 "SEC. GUIDA (€)": fmt_euro(ws.cell(row=r, column=17).value),
                 "Totale (€)": fmt_euro(totale_calcolato),
-                "% Operatore": fmt_num(ws.cell(row=r, column=col_perc).value, d) + "%",
+                "% Operatore": f"{perc_op_fmt}%" if perc_op_fmt != "" else "",
                 "Premio Lordo (€)": fmt_euro(ws.cell(row=r, column=col_premio).value),
             })
             if is_tot:
@@ -332,9 +327,9 @@ def parse_foglio_filiale(ws):
         for c in range(1, ws.max_column + 1):
             val = str(ws.cell(row=r, column=c).value or "").strip()
             if "Perc. Fatturato" in val:
-                kpi["perc_fatturato"] = fmt_perc(ws.cell(row=r + 1, column=c).value)
-                kpi["risultato_nps"] = fmt_perc(ws.cell(row=r + 1, column=c + 2).value)
-                kpi["premio_lordo"] = fmt_euro(ws.cell(row=r + 1, column=c + 4).value)
+                kpi["perc_fatturato"] = fmt_perc(ws.cell(row=r + 1, column=c).value) or "-"
+                kpi["risultato_nps"] = fmt_perc(ws.cell(row=r + 1, column=c + 2).value) or "-"
+                kpi["premio_lordo"] = fmt_euro(ws.cell(row=r + 1, column=c + 4).value) or "-"
                 
                 parti_obj = []
                 for col_scan in range(max(1, c), min(ws.max_column + 1, c + 6)):
@@ -521,7 +516,8 @@ def genera_tabella_html_unita(df):
         is_tot = "totale" in str(row["Operatore"]).lower()
         html += f'<tr{" class=\"totale-row\"" if is_tot else ""}>'
         for col in COLONNE_FILIALE:
-            val = row.get(col, "-")
+            raw_val = row.get(col, "")
+            val = "" if str(raw_val).strip() in ("-", "nan", "None") else str(raw_val).strip()
             cls = ' class="op-cell"' if col == "Operatore" else (' class="col-tot"' if col == "Totale (€)" else (' class="premio-cell"' if col == "Premio Lordo (€)" else ""))
             html += f"<td{cls}>{val}</td>"
         html += "</tr>"
@@ -530,7 +526,7 @@ def genera_tabella_html_unita(df):
 def render_scheda_pulita(dati_json, mostra_kpi=True):
     if isinstance(dati_json, dict) and "righe" in dati_json:
         kpi = dati_json.get("kpi", {})
-        if mostra_kpi and kpi and any(v != "-" for v in kpi.values()):
+        if mostra_kpi and kpi and any(v not in ("-", "") for v in kpi.values()):
             c1, c2, c3 = st.columns(3)
             c1.metric("📈 Perc. Fatturato", kpi.get("perc_fatturato", "-"))
             
