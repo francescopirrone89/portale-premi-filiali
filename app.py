@@ -90,7 +90,6 @@ def parse_foglio_filiale(ws):
     righe_tabella = []
     kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
 
-    # Individua le colonne "% Operatore" e "Premio di risultato Lordo" dalle intestazioni
     col_perc, col_premio = 19, 20
     for c in range(15, ws.max_column + 1):
         h_txt = (str(ws.cell(row=2, column=c).value or "") + " " + str(ws.cell(row=3, column=c).value or "")).strip().lower()
@@ -116,7 +115,6 @@ def parse_foglio_filiale(ws):
             v_upsell = to_float(ws.cell(row=r, column=15).value) or 0.0
             v_sec    = to_float(ws.cell(row=r, column=17).value) or 0.0
 
-            # Calcolo esatto della colonna Totale (€) come somma delle 7 componenti economiche
             totale_calcolato = v_tkm_50 + v_gold + v_cpp + v_rap + v_pai + v_upsell + v_sec
 
             righe_tabella.append({
@@ -194,7 +192,6 @@ def calcola_gran_totale_filiale(lista_dati_json):
     if not ordine_op:
         return None
 
-    # Ricalcola sempre il Totale (€) come somma delle 7 voci economiche per garantire coerenza assoluta
     for op in ordine_op:
         s = somme_op[op]
         s["Totale (€)"] = (
@@ -255,8 +252,9 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
     return {"righe": righe_finali}
 
-# --- CLASSIFICA OPERATORI (USA ESATTAMENTE LA STESSA LOGICA DEL GRAN TOTALE) ---
+# --- CLASSIFICA OPERATORI (USA T+KM WI € PIENO + ALTRE VOCI €) ---
 def calcola_classifica_operatori(records_filtrati):
+    """Usa calcola_gran_totale_filiale per ogni filiale e somma T+KM WI (€) pieno + le altre voci €."""
     per_filiale = {}
     for rec in records_filtrati:
         fil = str(rec.get("nome_scheda", "")).strip()
@@ -273,7 +271,15 @@ def calcola_classifica_operatori(records_filtrati):
             op = str(riga.get("Operatore", "")).strip()
             if not op or "totale" in op.lower():
                 continue
-            val_tot = to_float(riga.get("Totale (€)")) or 0.0
+            val_tot = (
+                (to_float(riga.get("T+KM WI (€)")) or 0.0) +
+                (to_float(riga.get("GOLD (€)")) or 0.0) +
+                (to_float(riga.get("CPP (€)")) or 0.0) +
+                (to_float(riga.get("RAP (€)")) or 0.0) +
+                (to_float(riga.get("PAI (€)")) or 0.0) +
+                (to_float(riga.get("UPSELL (€)")) or 0.0) +
+                (to_float(riga.get("SEC. GUIDA (€)")) or 0.0)
+            )
             chiave = " ".join(op.upper().split())
             if chiave not in agg_op:
                 agg_op[chiave] = {
@@ -596,7 +602,7 @@ else:
                 st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
 
         with tab5:
-            st.subheader("🏆 Classifica Operatori (Somma Colonna Totale €)")
+            st.subheader("🏆 Classifica Operatori (Somma T+KM WI € + Voci €)")
             admin_client = init_supabase_admin()
             tutti_op = carica_tutti_dati_admin(admin_client)
 
