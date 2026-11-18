@@ -613,16 +613,16 @@ def render_scheda_pulita(dati_json, mostra_kpi=True):
         st.dataframe(df, use_container_width=True, hide_index=True)
         return df
 
-# --- TABELLA RANGE ALIQUOTE (PER PANNELLO ANTEPRIMA) ---
+# --- TABELLA RANGE ALIQUOTE (ADATTIVA AL TEMA LIGHT / DARK DI STREAMLIT) ---
 def render_tabella_range_aliquote():
     html = (
         '<style>'
         '.range-box { display: flex; justify-content: center; margin-bottom: 6px; }'
-        '.range-table { border-collapse: collapse; font-family: "Segoe UI", Calibri, sans-serif; font-size: 13px; border: 1.5px solid #000000; background-color: #ffffff; }'
-        '.range-table th { background-color: #e2efda; color: #002060; font-weight: 700; text-align: center; padding: 6px 14px; border-bottom: 1.5px solid #000000; letter-spacing: 0.3px; }'
-        '.range-table td { color: #002060; padding: 2px 10px; text-align: center; background-color: #ffffff; line-height: 1.35; }'
+        '.range-table { border-collapse: collapse; font-family: "Segoe UI", Calibri, sans-serif; font-size: 13px; border: 1.5px solid light-dark(#000000, #8c959f); background-color: light-dark(#ffffff, #0e1117); }'
+        '.range-table th { background-color: #e2efda; color: #002060; font-weight: 700; text-align: center; padding: 6px 14px; border-bottom: 1.5px solid light-dark(#000000, #8c959f); letter-spacing: 0.3px; }'
+        '.range-table td { color: light-dark(#002060, #f0f2f6); padding: 2px 10px; text-align: center; background-color: light-dark(#ffffff, #0e1117); line-height: 1.35; }'
         '.range-table td.col-da { text-align: right; padding-left: 14px; padding-right: 6px; }'
-        '.range-table td.col-a { text-align: right; padding-left: 6px; padding-right: 10px; border-right: 1.5px dotted #000000; }'
+        '.range-table td.col-a { text-align: right; padding-left: 6px; padding-right: 10px; border-right: 1.5px dotted light-dark(#000000, #8c959f); }'
         '.range-table td.col-aliq { text-align: center; padding-left: 12px; padding-right: 14px; }'
         '.range-table tr:first-child td { padding-top: 5px; }'
         '.range-table tr:last-child td { padding-bottom: 5px; }'
