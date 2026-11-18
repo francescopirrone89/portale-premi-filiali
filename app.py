@@ -300,22 +300,16 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- RENDERING GRAFICO (SEGUE IL SELETTORE LIGHT/DARK DI STREAMLIT) ---
+# --- RENDERING GRAFICO (ADATTIVO NATIVO CON light-dark() PER STREAMLIT) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #c5cad3; margin: 8px 0 16px 0; }'
+        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
         '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
         '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
-        
-        '.premi-table td { padding: 7px 10px; border: 1px solid #d0d7de; text-align: right; color: #111111; background-color: #ffffff; }'
-        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: #f6f8fa; color: #111111; z-index: 1; }'
-        '.premi-table td.col-tot { background-color: #eef5e9; font-weight: 600; }'
-        
-        '[data-theme="dark"] .premi-table td, .stApp[data-theme="dark"] .premi-table td { border-color: #3a3f4b; color: #f0f2f6; background-color: #0e1117; }'
-        '[data-theme="dark"] .premi-table td.op-cell, .stApp[data-theme="dark"] .premi-table td.op-cell { background-color: #1e222b; color: #f0f2f6; }'
-        '[data-theme="dark"] .premi-table td.col-tot, .stApp[data-theme="dark"] .premi-table td.col-tot { background-color: #1d2633; }'
-        
+        '.premi-table td { padding: 7px 10px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
+        '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
+        '.premi-table td.col-tot { background-color: light-dark(#eef5e9, #1d2633); font-weight: 600; }'
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
         '</style>'
