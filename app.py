@@ -300,12 +300,11 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- RENDERING GRAFICO (ADATTIVO REALMENTE AL TEMA CHIARO/SCURO) ---
+# --- RENDERING GRAFICO (SEGUE IL SELETTORE LIGHT/DARK DI STREAMLIT) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        ':root { color-scheme: light dark; }'
-        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #8c959f66; margin: 8px 0 16px 0; }'
+        '.table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #c5cad3; margin: 8px 0 16px 0; }'
         '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
         '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
         
@@ -316,12 +315,6 @@ def genera_tabella_html_unita(df):
         '[data-theme="dark"] .premi-table td, .stApp[data-theme="dark"] .premi-table td { border-color: #3a3f4b; color: #f0f2f6; background-color: #0e1117; }'
         '[data-theme="dark"] .premi-table td.op-cell, .stApp[data-theme="dark"] .premi-table td.op-cell { background-color: #1e222b; color: #f0f2f6; }'
         '[data-theme="dark"] .premi-table td.col-tot, .stApp[data-theme="dark"] .premi-table td.col-tot { background-color: #1d2633; }'
-        
-        '@media (prefers-color-scheme: dark) {'
-        '  body:not([data-theme="light"]) .premi-table td { border-color: #3a3f4b; color: #f0f2f6; background-color: #0e1117; }'
-        '  body:not([data-theme="light"]) .premi-table td.op-cell { background-color: #1e222b; color: #f0f2f6; }'
-        '  body:not([data-theme="light"]) .premi-table td.col-tot { background-color: #1d2633; }'
-        '}'
         
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
