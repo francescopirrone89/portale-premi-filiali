@@ -662,7 +662,7 @@ else:
                 st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
 
         with tab5:
-            st.subheader("🏆 Classifica Operatori (Somma T+KM WI € + Voci €)")
+            st.subheader("🏆 Classifica Totale Operatori")
             admin_client = init_supabase_admin()
             tutti_op = carica_tutti_dati_admin(admin_client)
 
