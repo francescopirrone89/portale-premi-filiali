@@ -86,11 +86,11 @@ def fmt_perc(val, show_sign=False):
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # --- PARSER FEDELE AL FOGLIO EXCEL GENERICO / TOTALI (MANTIENE CELLE UNITE E ORDINE COLONNE) ---
-def parse_foglio_generico_excel(ws):
+def parse_foglio_generico_excel(ws, max_col_limit=None):
     max_r = ws.max_row
-    max_c = ws.max_column
+    max_c = min(ws.max_column, max_col_limit) if max_col_limit else ws.max_column
 
-    # Trova le colonne effettivamente utilizzate
+    # Trova le colonne effettivamente utilizzate entro il limite
     col_valide = []
     for c in range(1, max_c + 1):
         ha_valori = any(ws.cell(row=r, column=c).value is not None and str(ws.cell(row=r, column=c).value).strip() != "" for r in range(1, max_r + 1))
@@ -121,19 +121,20 @@ def parse_foglio_generico_excel(ws):
 
     r_head_end = r_head_1 + 1 if has_sub_header else r_head_1
 
-    # Mappa le celle unite dell'intestazione
+    # Mappa le celle unite dell'intestazione (tagliate a c_end se eccedono)
     merged_map = {}
     skip_cells = set()
     for rng in ws.merged_cells.ranges:
-        if rng.min_row >= r_head_1 and rng.min_row <= r_head_end:
+        if rng.min_row >= r_head_1 and rng.min_row <= r_head_end and rng.min_col <= c_end:
             rs = min(rng.max_row, r_head_end) - rng.min_row + 1
             cs = min(rng.max_col, c_end) - max(rng.min_col, c_start) + 1
             c0 = max(rng.min_col, c_start)
-            merged_map[(rng.min_row, c0)] = (rs, cs)
-            for rr in range(rng.min_row, min(rng.max_row, r_head_end) + 1):
-                for cc in range(c0, min(rng.max_col, c_end) + 1):
-                    if (rr, cc) != (rng.min_row, c0):
-                        skip_cells.add((rr, cc))
+            if cs >= 1 and rs >= 1:
+                merged_map[(rng.min_row, c0)] = (rs, cs)
+                for rr in range(rng.min_row, min(rng.max_row, r_head_end) + 1):
+                    for cc in range(c0, min(rng.max_col, c_end) + 1):
+                        if (rr, cc) != (rng.min_row, c0):
+                            skip_cells.add((rr, cc))
 
     # Se c'è doppia riga intestazione, unisce verticalmente in automatico le celle singole sopra una cella vuota
     if has_sub_header:
@@ -683,13 +684,16 @@ else:
                     admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_rif.strip()).execute()
                     for sheet_name in wb.sheetnames:
                         ws = wb[sheet_name]
+                        nome_pulito = sheet_name.strip()
                         test_h = str(ws.cell(row=2, column=3).value or "") + str(ws.cell(row=3, column=3).value or "")
-                        if sheet_name.strip().upper() != "TOTALI" and ("RA TOT" in test_h or "T+KM" in test_h):
+                        if nome_pulito.upper() == "TOTALI":
+                            dati_salvare = parse_foglio_generico_excel(ws, max_col_limit=34)
+                        elif "RA TOT" in test_h or "T+KM" in test_h:
                             dati_salvare = parse_foglio_filiale(ws)
                         else:
                             dati_salvare = parse_foglio_generico_excel(ws)
-                        admin_client.table("dati_premi").insert({"mese_riferimento": mese_rif.strip(), "nome_scheda": sheet_name.strip(), "dati_json": dati_salvare}).execute()
-                        schede_elaborate.append(sheet_name.strip())
+                        admin_client.table("dati_premi").insert({"mese_riferimento": mese_rif.strip(), "nome_scheda": nome_pulito, "dati_json": dati_salvare}).execute()
+                        schede_elaborate.append(nome_pulito)
                     st.success(f"✅ Pubblicazione completata per **{mese_rif}**!")
                     st.write("Schede divise e salvate:", ", ".join(schede_elaborate))
                 except Exception as e:
