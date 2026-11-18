@@ -90,12 +90,11 @@ def parse_foglio_filiale(ws):
     righe_tabella = []
     kpi = {"perc_fatturato": "-", "risultato_nps": "-", "premio_lordo": "-", "vs_obj": ""}
 
-    col_tot, col_perc, col_premio = 18, 19, 20
+    # Individua le colonne "% Operatore" e "Premio di risultato Lordo" dalle intestazioni
+    col_perc, col_premio = 19, 20
     for c in range(15, ws.max_column + 1):
         h_txt = (str(ws.cell(row=2, column=c).value or "") + " " + str(ws.cell(row=3, column=c).value or "")).strip().lower()
-        if h_txt == "totale" or (h_txt.startswith("totale") and "complessivo" not in h_txt):
-            col_tot = c
-        elif "operatore" in h_txt or "%" in h_txt:
+        if "operatore" in h_txt or "%" in h_txt:
             col_perc = c
         elif "premio" in h_txt or "lordo" in h_txt:
             col_premio = c
@@ -108,6 +107,18 @@ def parse_foglio_filiale(ws):
                 break
             is_tot = "totale" in nome_str.lower()
             d = 0 if is_tot else 2
+
+            v_tkm_50 = to_float(ws.cell(row=r, column=5).value) or 0.0
+            v_gold   = to_float(ws.cell(row=r, column=7).value) or 0.0
+            v_cpp    = to_float(ws.cell(row=r, column=9).value) or 0.0
+            v_rap    = to_float(ws.cell(row=r, column=11).value) or 0.0
+            v_pai    = to_float(ws.cell(row=r, column=13).value) or 0.0
+            v_upsell = to_float(ws.cell(row=r, column=15).value) or 0.0
+            v_sec    = to_float(ws.cell(row=r, column=17).value) or 0.0
+
+            # Calcolo esatto della colonna Totale (€) come somma delle 7 componenti economiche
+            totale_calcolato = v_tkm_50 + v_gold + v_cpp + v_rap + v_pai + v_upsell + v_sec
+
             righe_tabella.append({
                 "Operatore": nome_str,
                 "T+KM WI (RA)": fmt_num(ws.cell(row=r, column=3).value, 0),
@@ -125,7 +136,7 @@ def parse_foglio_filiale(ws):
                 "UPSELL (€)": fmt_euro(ws.cell(row=r, column=15).value),
                 "SEC. GUIDA (Q)": fmt_num(ws.cell(row=r, column=16).value, d),
                 "SEC. GUIDA (€)": fmt_euro(ws.cell(row=r, column=17).value),
-                "Totale (€)": fmt_euro(ws.cell(row=r, column=col_tot).value),
+                "Totale (€)": fmt_euro(totale_calcolato),
                 "% Operatore": fmt_num(ws.cell(row=r, column=col_perc).value, d) + "%",
                 "Premio Lordo (€)": fmt_euro(ws.cell(row=r, column=col_premio).value),
             })
@@ -183,6 +194,14 @@ def calcola_gran_totale_filiale(lista_dati_json):
     if not ordine_op:
         return None
 
+    # Ricalcola sempre il Totale (€) come somma delle 7 voci economiche per garantire coerenza assoluta
+    for op in ordine_op:
+        s = somme_op[op]
+        s["Totale (€)"] = (
+            s["T+KM WI (50%)"] + s["GOLD (€)"] + s["CPP (€)"] +
+            s["RAP (€)"] + s["PAI (€)"] + s["UPSELL (€)"] + s["SEC. GUIDA (€)"]
+        )
+
     grand_tot = {c: sum(somme_op[op][c] for op in ordine_op) for c in col_numeriche}
     tot_generale_euro = grand_tot["Totale (€)"]
 
@@ -238,7 +257,6 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
 # --- CLASSIFICA OPERATORI (USA ESATTAMENTE LA STESSA LOGICA DEL GRAN TOTALE) ---
 def calcola_classifica_operatori(records_filtrati):
-    """Usa calcola_gran_totale_filiale per ogni filiale ed estrae solo la colonna 'Totale (€)'."""
     per_filiale = {}
     for rec in records_filtrati:
         fil = str(rec.get("nome_scheda", "")).strip()
