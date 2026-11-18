@@ -718,6 +718,24 @@ else:
     # PANNELLO FILIALE (CON CAMBIO PASSWORD OBBLIGATORIO AL PRIMO ACCESSO)
     # ==========================================
     else:
+        st.markdown(
+            """
+            <style>
+            [data-testid="stToolbar"],
+            [data-testid="stDecoration"],
+            [data-testid="stStatusWidget"],
+            #MainMenu {
+                display: none !important;
+                visibility: hidden !important;
+            }
+            header[data-testid="stHeader"] {
+                background: transparent !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
         mia_scheda = profilo["nome_scheda_excel"]
         must_change = profilo.get("must_change_password", True)
 
