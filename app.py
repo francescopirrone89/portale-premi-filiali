@@ -180,6 +180,13 @@ def fmt_perc(val, show_sign=False):
     sign = "+" if (show_sign and num > 0) else ""
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
+def fmt_perc_diretta(val):
+    """Formatta un valore già espresso su scala 0-100 (es. 23,19 -> '23,19%')."""
+    num = to_float(val)
+    if num is None:
+        return ""
+    return f"{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+
 def classifica_tipo_colonna_totali(intestazione_completa, sample_fmt=""):
     h = intestazione_completa.strip().lower()
     if (
@@ -569,7 +576,7 @@ def calcola_gran_totale_filiale(lista_dati_json):
 
     return {"righe": righe_finali}
 
-# --- CLASSIFICA OPERATORI (USA T+KM WI € PIENO + ALTRE VOCI €) ---
+# --- CLASSIFICA OPERATORI PER REVENUE ACC. ---
 def calcola_classifica_operatori(records_filtrati):
     per_filiale = {}
     for rec in records_filtrati:
@@ -616,6 +623,54 @@ def calcola_classifica_operatori(records_filtrati):
         for v in agg_op.values()
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
+
+# --- CLASSIFICA OPERATORI PER INCIDENZA (% OPERATORE) ---
+def calcola_classifica_incidenza_operatori(records_filtrati):
+    agg_op = {}
+    for rec in records_filtrati:
+        fil = str(rec.get("nome_scheda", "")).strip()
+        d_json = rec.get("dati_json", {})
+        if not isinstance(d_json, dict) or "righe" not in d_json:
+            continue
+
+        for riga in d_json["righe"]:
+            op = str(riga.get("Operatore", "")).strip()
+            if not op or "totale" in op.lower():
+                continue
+
+            val_perc = to_float(riga.get("% Operatore"))
+            if val_perc is None:
+                continue
+
+            # Normalizza su scala 0-100 se salvato come decimale puro (es. 0.2319 -> 23.19)
+            raw_str = str(riga.get("% Operatore", ""))
+            if "%" not in raw_str and abs(val_perc) <= 1.0 and val_perc != 0:
+                val_perc = val_perc * 100.0
+
+            chiave = " ".join(op.upper().split())
+            if chiave not in agg_op:
+                agg_op[chiave] = {
+                    "Operatore": op,
+                    "Filiali": set(),
+                    "Valori": []
+                }
+            if fil:
+                agg_op[chiave]["Filiali"].add(fil)
+            agg_op[chiave]["Valori"].append(val_perc)
+
+    risultati = []
+    for v in agg_op.values():
+        if not v["Valori"]:
+            continue
+        media_incid = sum(v["Valori"]) / len(v["Valori"])
+        risultati.append({
+            "Operatore": v["Operatore"],
+            "Filiale": ", ".join(sorted(v["Filiali"])),
+            "Incidenza (%)": media_incid,
+            "Mesi Rilevati": len(v["Valori"])
+        })
+
+    return sorted(risultati, key=lambda x: x["Incidenza (%)"], reverse=True)
 
 # --- RENDERING GRAFICO (ADATTIVO NATIVO CON light-dark() + RESPONSIVE MOBILE) ---
 def genera_tabella_html_unita(df):
@@ -846,8 +901,8 @@ def render_sezione_gran_totale(filiali_consentite=None):
     else:
         st.info("Nessun dato disponibile per visualizzare il Gran Totale.")
 
-def render_sezione_classifica(filiali_consentite=None):
-    st.subheader("🏆 Classifica Operatori")
+def render_sezione_classifica_revenue(filiali_consentite=None):
+    st.subheader("🏆 Classifica Operatori per Revenue Acc.")
     admin_client = init_supabase_admin()
     tutti_raw = carica_tutti_dati_admin(admin_client)
     tutti_op = filtra_records_per_admin(tutti_raw, filiali_consentite)
@@ -863,9 +918,9 @@ def render_sezione_classifica(filiali_consentite=None):
 
         c_op1, c_op2 = st.columns([2, 1])
         with c_op1:
-            mesi_sel_op = st.multiselect("Mesi da sommare:", mesi_op, default=mesi_op, key="op_mesi_sel")
+            mesi_sel_op = st.multiselect("Mesi da sommare:", mesi_op, default=mesi_op, key="op_rev_mesi_sel")
         with c_op2:
-            filtro_fil_op = st.selectbox("Filtra per Ufficio:", [etich_tutte] + filiali_op, key="op_fil_sel")
+            filtro_fil_op = st.selectbox("Filtra per Ufficio:", [etich_tutte] + filiali_op, key="op_rev_fil_sel")
 
         if mesi_sel_op:
             rec_filtrati = [
@@ -891,11 +946,67 @@ def render_sezione_classifica(filiali_consentite=None):
 
                 buf_op = io.BytesIO()
                 with pd.ExcelWriter(buf_op, engine='openpyxl') as writer:
-                    df_classifica.to_excel(writer, index=False, sheet_name="Classifica_Operatori")
+                    df_classifica.to_excel(writer, index=False, sheet_name="Classifica_Revenue_Acc")
                 st.download_button(
-                    "📥 Scarica Classifica Operatori (Excel)",
+                    "📥 Scarica Classifica Revenue Acc. (Excel)",
                     data=buf_op.getvalue(),
-                    file_name="Classifica_Operatori_Totale.xlsx"
+                    file_name="Classifica_Operatori_Revenue_Acc.xlsx"
+                )
+            else:
+                st.warning("Nessun operatore trovato per i filtri selezionati.")
+    else:
+        st.info("Nessun dato disponibile per visualizzare la classifica.")
+
+def render_sezione_classifica_incidenza(filiali_consentite=None):
+    st.subheader("📈 Classifica Operatori per Incid.")
+    admin_client = init_supabase_admin()
+    tutti_raw = carica_tutti_dati_admin(admin_client)
+    tutti_inc = filtra_records_per_admin(tutti_raw, filiali_consentite)
+
+    if tutti_inc:
+        mesi_inc = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_inc]))
+        filiali_inc = sorted(list(set(
+            r["nome_scheda"] for r in tutti_inc
+            if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
+        )), key=lambda x: x.lower())
+
+        etich_tutte = "Tutte le Filiali" if filiali_consentite is None else "Tutte le mie Filiali"
+
+        c_inc1, c_inc2 = st.columns([2, 1])
+        with c_inc1:
+            mesi_sel_inc = st.multiselect("Mesi da considerare:", mesi_inc, default=mesi_inc, key="op_inc_mesi_sel")
+        with c_inc2:
+            filtro_fil_inc = st.selectbox("Filtra per Ufficio:", [etich_tutte] + filiali_inc, key="op_inc_fil_sel")
+
+        if mesi_sel_inc:
+            rec_filtrati = [
+                r for r in tutti_inc
+                if r["mese_riferimento"] in mesi_sel_inc
+                and (filtro_fil_inc == etich_tutte or r["nome_scheda"] == filtro_fil_inc)
+            ]
+            classifica_inc = calcola_classifica_incidenza_operatori(rec_filtrati)
+
+            if classifica_inc:
+                righe_classifica_inc = [
+                    {
+                        "Pos.": f"{pos}°",
+                        "Operatore": item["Operatore"],
+                        "Filiale": item["Filiale"],
+                        "% Operatore (Media)" if len(mesi_sel_inc) > 1 else "% Operatore": fmt_perc_diretta(item["Incidenza (%)"])
+                    }
+                    for pos, item in enumerate(classifica_inc, start=1)
+                ]
+
+                df_classifica_inc = pd.DataFrame(righe_classifica_inc)
+                st.dataframe(df_classifica_inc, use_container_width=True, hide_index=True)
+
+                buf_inc = io.BytesIO()
+                with pd.ExcelWriter(buf_inc, engine='openpyxl') as writer:
+                    df_classifica_inc.to_excel(writer, index=False, sheet_name="Classifica_Incidenza")
+                st.download_button(
+                    "📥 Scarica Classifica per Incid. (Excel)",
+                    data=buf_inc.getvalue(),
+                    file_name="Classifica_Operatori_Incidenza.xlsx"
                 )
             else:
                 st.warning("Nessun operatore trovato per i filtri selezionati.")
@@ -1069,7 +1180,8 @@ else:
                 "👥 Gestione Utenti e Filiali",
                 "👀 Gestione e Anteprima Dati",
                 "📊 Gran Totale Annuale",
-                "🏆 Classifica Operatori"
+                "🏆 Classifica Operatori per Revenue Acc.",
+                "📈 Classifica Operatori per Incid."
             ]
             if puo_vedere_log:
                 nomi_tabs.append("📋 Log Accessi")
@@ -1319,10 +1431,13 @@ else:
                 render_sezione_gran_totale(filiali_consentite=None)
 
             with tabs_sa[4]:
-                render_sezione_classifica(filiali_consentite=None)
+                render_sezione_classifica_revenue(filiali_consentite=None)
+
+            with tabs_sa[5]:
+                render_sezione_classifica_incidenza(filiali_consentite=None)
 
             if puo_vedere_log:
-                with tabs_sa[5]:
+                with tabs_sa[6]:
                     render_sezione_log_accessi()
 
         else:
@@ -1330,7 +1445,8 @@ else:
             nomi_tabs_adm = [
                 "👀 Anteprima Dati",
                 "📊 Gran Totale Annuale",
-                "🏆 Classifica Operatori"
+                "🏆 Classifica Operatori per Revenue Acc.",
+                "📈 Classifica Operatori per Incid."
             ]
             if puo_vedere_log:
                 nomi_tabs_adm.append("📋 Log Accessi")
@@ -1344,10 +1460,13 @@ else:
                 render_sezione_gran_totale(filiali_consentite=filiali_consentite)
 
             with tabs_adm[2]:
-                render_sezione_classifica(filiali_consentite=filiali_consentite)
+                render_sezione_classifica_revenue(filiali_consentite=filiali_consentite)
+
+            with tabs_adm[3]:
+                render_sezione_classifica_incidenza(filiali_consentite=filiali_consentite)
 
             if puo_vedere_log:
-                with tabs_adm[3]:
+                with tabs_adm[4]:
                     render_sezione_log_accessi()
 
     # ==========================================
