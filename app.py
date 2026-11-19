@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 from supabase import create_client
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import io
 
 st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout="wide")
@@ -18,6 +20,8 @@ COLONNE_FILIALE = [
     "Totale (€)", "% Operatore", "Premio Lordo (€)"
 ]
 
+EMAIL_LOG_AUTORIZZATO = "francesco.pirrone@sbc.it"
+
 @st.cache_resource
 def init_supabase():
     return create_client(st.secrets["SUPABASE_URL"].strip(), st.secrets["SUPABASE_KEY"].strip())
@@ -31,6 +35,76 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "profilo" not in st.session_state:
     st.session_state.profilo = None
+if "log_accesso_id" not in st.session_state:
+    st.session_state.log_accesso_id = None
+
+# --- REGISTRAZIONE LOG ACCESSI (ORA IN / ORA OUT) ---
+def ora_italia_adesso():
+    return datetime.now(ZoneInfo("Europe/Rome"))
+
+def registra_log_ingresso(user_obj, profilo_dict):
+    try:
+        admin_client = init_supabase_admin()
+        adesso = ora_italia_adesso()
+        email_u = str(profilo_dict.get("email") or getattr(user_obj, "email", "")).strip()
+
+        # Chiude eventuali sessioni precedenti rimaste aperte senza cliccare Logout
+        admin_client.table("log_accessi").update({
+            "ora_out": adesso.strftime("%H:%M:%S")
+        }).eq("email", email_u).is_("ora_out", "null").execute()
+
+        res = admin_client.table("log_accessi").insert({
+            "user_id": str(user_obj.id),
+            "email": email_u,
+            "ruolo": str(profilo_dict.get("ruolo", "")).strip(),
+            "filiale": str(profilo_dict.get("nome_scheda_excel", "")).strip(),
+            "data_accesso": adesso.strftime("%Y-%m-%d"),
+            "ora_in": adesso.strftime("%H:%M:%S")
+        }).execute()
+
+        if res.data and len(res.data) > 0:
+            st.session_state.log_accesso_id = res.data[0]["id"]
+    except Exception:
+        pass
+
+def registra_log_uscita():
+    try:
+        admin_client = init_supabase_admin()
+        adesso = ora_italia_adesso()
+        log_id = st.session_state.get("log_accesso_id")
+        if log_id:
+            admin_client.table("log_accessi").update({
+                "ora_out": adesso.strftime("%H:%M:%S")
+            }).eq("id", log_id).execute()
+        elif st.session_state.get("profilo"):
+            email_u = str(st.session_state.profilo.get("email", "")).strip()
+            if email_u:
+                admin_client.table("log_accessi").update({
+                    "ora_out": adesso.strftime("%H:%M:%S")
+                }).eq("email", email_u).is_("ora_out", "null").execute()
+    except Exception:
+        pass
+    finally:
+        st.session_state.log_accesso_id = None
+
+def carica_tutti_log_accessi(admin_client):
+    tutti_log = []
+    batch_size = 1000
+    offset = 0
+    while True:
+        res = (
+            admin_client.table("log_accessi")
+            .select("id, email, ruolo, filiale, data_accesso, ora_in, ora_out")
+            .order("id", desc=True)
+            .range(offset, offset + batch_size - 1)
+            .execute()
+        )
+        dati = res.data or []
+        tutti_log.extend(dati)
+        if len(dati) < batch_size:
+            break
+        offset += batch_size
+    return tutti_log
 
 # --- CARICAMENTO COMPLETO DA SUPABASE (SUPERA IL LIMITE DI 1000 RIGHE) ---
 def carica_tutti_dati_admin(admin_client, order_desc=False):
@@ -640,7 +714,7 @@ def render_tabella_range_aliquote():
     )
     st.markdown(html, unsafe_allow_html=True)
 
-# --- HELPER SEZIONI CONDIVISE TRA SUPER ADMIN E ADMIN ---
+# --- HELPER SEZIONI CONDIVISE ---
 def render_sezione_anteprima(is_super_admin):
     col_tit_ante, col_range_ante, col_spazio_ante = st.columns([1.4, 1.3, 1.3])
     with col_tit_ante:
@@ -761,17 +835,82 @@ def render_sezione_classifica():
     else:
         st.info("Carica almeno un file mensile per visualizzare la classifica.")
 
+# --- SEZIONE LOG ACCESSI (SOLO PER francesco.pirrone@sbc.it) ---
+def render_sezione_log_accessi():
+    st.subheader("📋 Log Accessi al Portale")
+    admin_client = init_supabase_admin()
+    try:
+        logs = carica_tutti_log_accessi(admin_client)
+    except Exception as e:
+        st.error(f"Tabella 'log_accessi' non trovata o errore lettura: {e}")
+        return
+
+    if not logs:
+        st.info("Nessun accesso ancora registrato.")
+        return
+
+    df_logs = pd.DataFrame(logs)
+
+    col_l1, col_l2, col_l3 = st.columns([1.5, 1.5, 1])
+    utenti_unici = ["Tutti gli utenti"] + sorted(list(set(df_logs["email"].dropna().tolist())))
+    date_uniche = ["Tutte le date"] + sorted(list(set(df_logs["data_accesso"].astype(str).dropna().tolist())), reverse=True)
+
+    with col_l1:
+        filtro_utente = st.selectbox("Filtra per Utente:", utenti_unici, key="log_fil_utente")
+    with col_l2:
+        filtro_data = st.selectbox("Filtra per Data Accesso:", date_uniche, key="log_fil_data")
+    with col_l3:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Aggiorna Log", use_container_width=True):
+            st.rerun()
+
+    if filtro_utente != "Tutti gli utenti":
+        df_logs = df_logs[df_logs["email"] == filtro_utente]
+    if filtro_data != "Tutte le date":
+        df_logs = df_logs[df_logs["data_accesso"].astype(str) == filtro_data]
+
+    def fmt_data_it(val):
+        s = str(val or "").strip()
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+        except Exception:
+            return s
+
+    df_show = pd.DataFrame({
+        "Utente (Email)": df_logs["email"].fillna("-"),
+        "Filiale / Scheda": df_logs["filiale"].replace("", "-").fillna("-"),
+        "Ruolo": df_logs["ruolo"].fillna("-").apply(lambda x: str(x).replace("_", " ").upper()),
+        "Data Accesso": df_logs["data_accesso"].apply(fmt_data_it),
+        "Ora In": df_logs["ora_in"].fillna("-").apply(lambda x: str(x)[:8]),
+        "Ora Out": df_logs["ora_out"].fillna("In corso / Non rilevata").apply(lambda x: str(x)[:8] if x != "In corso / Non rilevata" else x)
+    })
+
+    st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+    buf_log = io.BytesIO()
+    with pd.ExcelWriter(buf_log, engine='openpyxl') as writer:
+        df_show.to_excel(writer, index=False, sheet_name="Log_Accessi")
+    st.download_button(
+        "📥 Scarica Log Accessi (Excel)",
+        data=buf_log.getvalue(),
+        file_name="Log_Accessi_Portale.xlsx"
+    )
+
 # --- AUTH ---
 def login(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         st.session_state.user = res.user
-        st.session_state.profilo = supabase.table("profili_filiali").select("*").eq("id", res.user.id).single().execute().data
+        profilo_data = supabase.table("profili_filiali").select("*").eq("id", res.user.id).single().execute().data
+        st.session_state.profilo = profilo_data
+        registra_log_ingresso(res.user, profilo_data)
         st.rerun()
     except Exception:
         st.error("Credenziali non valide o profilo non configurato.")
 
 def logout():
+    registra_log_uscita()
     supabase.auth.sign_out()
     st.session_state.user = None
     st.session_state.profilo = None
@@ -790,6 +929,9 @@ if not st.session_state.user:
 else:
     profilo = st.session_state.profilo
     ruolo = str(profilo.get("ruolo", "filiale")).strip().lower()
+    email_corrente = str(profilo.get("email", "")).strip().lower()
+    puo_vedere_log = (email_corrente == EMAIL_LOG_AUTORIZZATO)
+
     with st.sidebar:
         st.write(f"👤 **{profilo['email']}**")
         st.write(f"Ruolo: `{ruolo.replace('_', ' ').upper()}`")
@@ -850,15 +992,19 @@ else:
             st.markdown('</div>', unsafe_allow_html=True)
 
         if is_super:
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            nomi_tabs = [
                 "📤 Carica Excel Mensile",
                 "👥 Gestione Utenti e Filiali",
                 "👀 Gestione e Anteprima Dati",
                 "📊 Gran Totale Annuale",
                 "🏆 Classifica Operatori"
-            ])
+            ]
+            if puo_vedere_log:
+                nomi_tabs.append("📋 Log Accessi")
 
-            with tab1:
+            tabs_sa = st.tabs(nomi_tabs)
+
+            with tabs_sa[0]:
                 st.subheader("Carica il riepilogo mensile")
                 mese_rif = st.text_input("Mese / Periodo di riferimento (es. Ottobre 2026)", placeholder="Es. Ottobre 2026")
                 uploaded_file = st.file_uploader("Seleziona il file Excel (.xlsx)", type=["xlsx"], key="upload_premi")
@@ -886,7 +1032,7 @@ else:
                     except Exception as e:
                         st.error(f"Errore durante l'elaborazione: {e}")
 
-            with tab2:
+            with tabs_sa[1]:
                 st.subheader("📥 Importazione massiva utenti da Excel")
                 df_modello = pd.DataFrame([
                     {"email": "filiale.milazzo@azienda.it", "password": "Password123!", "nome_scheda_excel": "Milazzo"},
@@ -1025,31 +1171,43 @@ else:
                             admin_client.auth.admin.delete_user(opzioni[u_del])
                             st.rerun()
 
-            with tab3:
+            with tabs_sa[2]:
                 render_sezione_anteprima(is_super_admin=True)
 
-            with tab4:
+            with tabs_sa[3]:
                 render_sezione_gran_totale()
 
-            with tab5:
+            with tabs_sa[4]:
                 render_sezione_classifica()
 
+            if puo_vedere_log:
+                with tabs_sa[5]:
+                    render_sezione_log_accessi()
+
         else:
-            # Ruolo: ADMIN (solo consultazione, Gran Totale Annuale e Classifica Operatori)
-            tab_a1, tab_a2, tab_a3 = st.tabs([
+            # Ruolo: ADMIN
+            nomi_tabs_adm = [
                 "👀 Anteprima Dati",
                 "📊 Gran Totale Annuale",
                 "🏆 Classifica Operatori"
-            ])
+            ]
+            if puo_vedere_log:
+                nomi_tabs_adm.append("📋 Log Accessi")
 
-            with tab_a1:
+            tabs_adm = st.tabs(nomi_tabs_adm)
+
+            with tabs_adm[0]:
                 render_sezione_anteprima(is_super_admin=False)
 
-            with tab_a2:
+            with tabs_adm[1]:
                 render_sezione_gran_totale()
 
-            with tab_a3:
+            with tabs_adm[2]:
                 render_sezione_classifica()
+
+            if puo_vedere_log:
+                with tabs_adm[3]:
+                    render_sezione_log_accessi()
 
     # ==========================================
     # PANNELLO FILIALE (CON CAMBIO PASSWORD OBBLIGATORIO AL PRIMO ACCESSO)
