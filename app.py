@@ -20,7 +20,7 @@ COLONNE_FILIALE = [
     "Totale (€)", "% Operatore", "Premio Lordo (€)"
 ]
 
-EMAIL_LOG_AUTORIZZATO = "francesco.pirrone@sbc.it"
+EMAIL_SUPER_OWNER = "francesco.pirrone@sbc.it"
 
 @st.cache_resource
 def init_supabase():
@@ -37,6 +37,42 @@ if "profilo" not in st.session_state:
     st.session_state.profilo = None
 if "log_accesso_id" not in st.session_state:
     st.session_state.log_accesso_id = None
+
+# --- NASCONDE BARRA SUPERIORE E FOOTER/MANAGE APP A TUTTI TRANNE francesco.pirrone@sbc.it ---
+def applica_stile_interfaccia_utente():
+    profilo_corr = st.session_state.get("profilo") or {}
+    email_corr = str(profilo_corr.get("email", "")).strip().lower()
+    is_owner = (email_corr == EMAIL_SUPER_OWNER)
+
+    if not is_owner:
+        st.markdown(
+            """
+            <style>
+            [data-testid="stToolbar"],
+            [data-testid="stToolbarActions"],
+            [data-testid="stDecoration"],
+            [data-testid="stStatusWidget"],
+            #MainMenu,
+            header[data-testid="stHeader"] button,
+            header[data-testid="stHeader"] a,
+            footer,
+            [data-testid="stFooter"],
+            [data-testid="manage-app-button"],
+            .stAppDeployButton,
+            div[class*="viewerBadge"],
+            div[class*="StatusWidget"],
+            iframe[title*="streamlit"] {
+                display: none !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
+            header[data-testid="stHeader"] {
+                background: transparent !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
 
 # --- FILTRO FILIALI CONSENTITE (PER ADMIN E FILIALI MULTI-SEDE) ---
 def get_filiali_consentite_utente(profilo_dict):
@@ -181,7 +217,6 @@ def fmt_perc(val, show_sign=False):
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def fmt_perc_diretta(val):
-    """Formatta un valore già espresso su scala 0-100 (es. 72,33 -> '72,33%')."""
     num = to_float(val)
     if num is None:
         return ""
@@ -651,7 +686,6 @@ def calcola_classifica_incidenza_operatori(records_filtrati):
                 continue
 
             val_tot_op = to_float(riga.get("Totale (€)")) or 0.0
-            tot_ufficio_calc = val_tot_op
 
             chiave = " ".join(op.upper().split())
             if chiave not in agg_op:
@@ -1110,6 +1144,9 @@ def logout():
     st.session_state.profilo = None
     st.rerun()
 
+# Applica subito le regole di visibilità barra superiore/inferiore in base all'utente connesso
+applica_stile_interfaccia_utente()
+
 if not st.session_state.user:
     _, col2, _ = st.columns([1, 1.5, 1])
     with col2:
@@ -1124,7 +1161,7 @@ else:
     profilo = st.session_state.profilo
     ruolo = str(profilo.get("ruolo", "filiale")).strip().lower()
     email_corrente = str(profilo.get("email", "")).strip().lower()
-    puo_vedere_log = (email_corrente == EMAIL_LOG_AUTORIZZATO)
+    is_owner = (email_corrente == EMAIL_SUPER_OWNER)
     must_change = bool(profilo.get("must_change_password", False))
 
     with st.sidebar:
@@ -1199,7 +1236,7 @@ else:
                 "🏆 Classifica Operatori per Revenue Acc.",
                 "📈 Classifica Operatori per Incid."
             ]
-            if puo_vedere_log:
+            if is_owner:
                 nomi_tabs.append("📋 Log Accessi")
 
             tabs_sa = st.tabs(nomi_tabs)
@@ -1452,7 +1489,7 @@ else:
             with tabs_sa[5]:
                 render_sezione_classifica_incidenza(filiali_consentite=None)
 
-            if puo_vedere_log:
+            if is_owner:
                 with tabs_sa[6]:
                     render_sezione_log_accessi()
 
@@ -1464,7 +1501,7 @@ else:
                 "🏆 Classifica Operatori per Revenue Acc.",
                 "📈 Classifica Operatori per Incid."
             ]
-            if puo_vedere_log:
+            if is_owner:
                 nomi_tabs_adm.append("📋 Log Accessi")
 
             tabs_adm = st.tabs(nomi_tabs_adm)
@@ -1481,7 +1518,7 @@ else:
             with tabs_adm[3]:
                 render_sezione_classifica_incidenza(filiali_consentite=filiali_consentite)
 
-            if puo_vedere_log:
+            if is_owner:
                 with tabs_adm[4]:
                     render_sezione_log_accessi()
 
@@ -1489,24 +1526,6 @@ else:
     # PANNELLO FILIALE (SUPPORTO SIA A SINGOLA FILIALE CHE A PIÙ FILIALI ASSEGNATE)
     # ==========================================
     else:
-        st.markdown(
-            """
-            <style>
-            [data-testid="stToolbar"],
-            [data-testid="stDecoration"],
-            [data-testid="stStatusWidget"],
-            #MainMenu {
-                display: none !important;
-                visibility: hidden !important;
-            }
-            header[data-testid="stHeader"] {
-                background: transparent !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
         lista_mie_schede = get_lista_filiali_filiale(profilo)
         must_change_filiale = profilo.get("must_change_password", True)
 
