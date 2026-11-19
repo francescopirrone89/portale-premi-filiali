@@ -38,17 +38,19 @@ if "profilo" not in st.session_state:
 if "log_accesso_id" not in st.session_state:
     st.session_state.log_accesso_id = None
 
-# --- FILTRO FILIALI CONSENTITE PER ADMIN ---
-def get_filiali_consentite_admin(profilo_dict):
-    """
-    Restituisce None se l'admin può vedere TUTTE le filiali.
-    Altrimenti restituisce un set con i nomi normalizzati (maiuscoli) delle sole filiali assegnate.
-    """
+# --- FILTRO FILIALI CONSENTITE (PER ADMIN E FILIALI MULTI-SEDE) ---
+def get_filiali_consentite_utente(profilo_dict):
     raw = str(profilo_dict.get("nome_scheda_excel") or "").strip()
     if not raw or raw.upper() in ("TUTTE", "ALL", "*"):
         return None
     lista = [x.strip().upper() for x in raw.split(",") if x.strip()]
     return set(lista) if lista else None
+
+def get_lista_filiali_filiale(profilo_dict):
+    raw = str(profilo_dict.get("nome_scheda_excel") or "").strip()
+    if not raw or raw.upper() in ("TUTTE", "ALL", "*"):
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
 
 def filtra_records_per_admin(records, filiali_consentite_set):
     if filiali_consentite_set is None:
@@ -1001,11 +1003,9 @@ else:
     with st.sidebar:
         st.write(f"👤 **{profilo['email']}**")
         st.write(f"Ruolo: `{ruolo.replace('_', ' ').upper()}`")
-        if ruolo == "filiale":
-            st.write(f"Filiale: **{profilo['nome_scheda_excel']}**")
-        elif ruolo == "admin":
+        if ruolo in ("filiale", "admin"):
             fil_lbl = str(profilo.get("nome_scheda_excel") or "TUTTE").strip()
-            st.write(f"Filiali: **{fil_lbl}**")
+            st.write(f"Filiale/i: **{fil_lbl}**")
         st.divider()
         if st.button("Esci (Logout)", use_container_width=True):
             logout()
@@ -1015,7 +1015,7 @@ else:
     # ==========================================
     if ruolo in ("super_admin", "admin"):
         is_super = (ruolo == "super_admin")
-        filiali_consentite = None if is_super else get_filiali_consentite_admin(profilo)
+        filiali_consentite = None if is_super else get_filiali_consentite_utente(profilo)
 
         st.markdown(
             """
@@ -1226,44 +1226,74 @@ else:
                             else:
                                 st.warning("La password deve avere almeno 6 caratteri.")
 
-                    # --- ASSEGNAZIONE RAPIDA FILIALI AGLI UTENTI ADMIN ---
-                    utenti_admin_list = [u for u in utenti_res.data if str(u.get("ruolo", "")).strip().lower() == "admin"]
-                    if utenti_admin_list:
+                    # --- ASSEGNAZIONE / AGGIUNTA FILIALI PER QUALSIASI UTENTE (FILIALE O ADMIN) ---
+                    utenti_assegnabili = [
+                        u for u in utenti_res.data
+                        if str(u.get("ruolo", "")).strip().lower() in ("filiale", "admin")
+                    ]
+                    if utenti_assegnabili:
                         st.divider()
-                        st.subheader("🏢 Assegna Filiali agli Utenti Admin")
+                        st.subheader("🏢 Assegna / Aggiungi Filiali a un Utente (Filiale o Admin)")
                         tutti_dati_f = carica_tutti_dati_admin(admin_client)
-                        filiali_esistenti = sorted(list(set(
+                        set_opzioni_fil = set(
                             str(r["nome_scheda"]).strip() for r in tutti_dati_f
                             if str(r.get("nome_scheda", "")).strip()
-                        )), key=lambda x: x.lower())
+                        )
+                        for u_item in utenti_assegnabili:
+                            raw_u = str(u_item.get("nome_scheda_excel") or "").strip()
+                            if raw_u and raw_u.upper() not in ("TUTTE", "ALL", "*"):
+                                for pezzo in raw_u.split(","):
+                                    if pezzo.strip():
+                                        set_opzioni_fil.add(pezzo.strip())
 
-                        opz_adm = {f"{u['email']}": u for u in utenti_admin_list}
-                        ca1, ca2, ca3 = st.columns([1.5, 2.5, 1])
+                        filiali_esistenti = sorted(list(set_opzioni_fil), key=lambda x: x.lower())
+                        mappa_case = {f.upper(): f for f in filiali_esistenti}
+
+                        opz_utenti_fil = {
+                            f"{u['email']} [{str(u.get('ruolo', '')).upper()}]": u
+                            for u in utenti_assegnabili
+                        }
+                        ca1, ca2, ca3 = st.columns([1.6, 2.4, 1])
                         with ca1:
-                            adm_scelto_email = st.selectbox("Seleziona Admin:", list(opz_adm.keys()), key="sel_admin_fil")
-                            adm_obj = opz_adm[adm_scelto_email]
+                            ut_scelto_label = st.selectbox(
+                                "Seleziona Utente (Filiale o Admin):",
+                                list(opz_utenti_fil.keys()),
+                                key="sel_utente_fil_multi"
+                            )
+                            ut_obj = opz_utenti_fil[ut_scelto_label]
+                            ut_ruolo = str(ut_obj.get("ruolo", "filiale")).strip().lower()
+                            cur_raw = str(ut_obj.get("nome_scheda_excel") or "").strip()
+                            st.caption(f"Attualmente assegnate: **`{cur_raw or 'Nessuna'}`**")
                         with ca2:
-                            cur_raw = str(adm_obj.get("nome_scheda_excel") or "").strip()
                             default_fils = []
                             if cur_raw and cur_raw.upper() not in ("TUTTE", "ALL", "*"):
-                                mappa_case = {f.upper(): f for f in filiali_esistenti}
-                                default_fils = [mappa_case[x.strip().upper()] for x in cur_raw.split(",") if x.strip().upper() in mappa_case]
-                            fil_scelte_adm = st.multiselect(
-                                "Filiali visibili (lascia vuoto per TUTTE):",
-                                filiali_esistenti,
+                                seen_up = set()
+                                for x in cur_raw.split(","):
+                                    x_up = x.strip().upper()
+                                    if x_up and x_up in mappa_case and x_up not in seen_up:
+                                        default_fils.append(mappa_case[x_up])
+                                        seen_up.add(x_up)
+
+                            hint_vuoto = "lascia vuoto per TUTTE" if ut_ruolo == "admin" else "seleziona una o più filiali"
+                            fil_scelte_ut = st.multiselect(
+                                f"Filiali assegnate (aggiungi o rimuovi; {hint_vuoto}):",
+                                options=filiali_esistenti,
                                 default=default_fils,
-                                key="multi_fil_admin"
+                                key=f"multi_fil_user_{ut_obj['id']}"
                             )
                         with ca3:
                             st.write("")
                             st.write("")
-                            if st.button("Salva Filiali", type="primary", use_container_width=True):
-                                nuovo_val = ", ".join(fil_scelte_adm) if fil_scelte_adm else "TUTTE"
-                                admin_client.table("profili_filiali").update({
-                                    "nome_scheda_excel": nuovo_val
-                                }).eq("id", adm_obj["id"]).execute()
-                                st.success(f"✅ Filiali aggiornate per {adm_scelto_email}: {nuovo_val}")
-                                st.rerun()
+                            if st.button("Salva Filiali", type="primary", use_container_width=True, key=f"btn_save_fil_{ut_obj['id']}"):
+                                if not fil_scelte_ut and ut_ruolo != "admin":
+                                    st.warning("Seleziona almeno una filiale per un utente Filiale.")
+                                else:
+                                    nuovo_val = ", ".join(fil_scelte_ut) if fil_scelte_ut else "TUTTE"
+                                    admin_client.table("profili_filiali").update({
+                                        "nome_scheda_excel": nuovo_val
+                                    }).eq("id", ut_obj["id"]).execute()
+                                    st.success(f"✅ Filiali aggiornate per {ut_obj['email']}: {nuovo_val}")
+                                    st.rerun()
 
                     st.divider()
                     st.subheader("Utenti registrati")
@@ -1321,7 +1351,7 @@ else:
                     render_sezione_log_accessi()
 
     # ==========================================
-    # PANNELLO FILIALE (CON CAMBIO PASSWORD OBBLIGATORIO AL PRIMO ACCESSO)
+    # PANNELLO FILIALE (SUPPORTO SIA A SINGOLA FILIALE CHE A PIÙ FILIALI ASSEGNATE)
     # ==========================================
     else:
         st.markdown(
@@ -1342,12 +1372,19 @@ else:
             unsafe_allow_html=True
         )
 
-        mia_scheda = profilo["nome_scheda_excel"]
+        lista_mie_schede = get_lista_filiali_filiale(profilo)
         must_change_filiale = profilo.get("must_change_password", True)
 
         if must_change_filiale:
             render_cambio_password_obbligatorio(profilo)
+        elif not lista_mie_schede:
+            st.warning("Nessuna filiale associata al tuo account. Contatta l'amministratore.")
         else:
+            if len(lista_mie_schede) == 1:
+                mia_scheda = lista_mie_schede[0]
+            else:
+                mia_scheda = st.selectbox("Seleziona la filiale da consultare:", lista_mie_schede, key="filiale_multi_select")
+
             st.title(f"📊 Riepilogo Premi - {mia_scheda}")
             dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
             
@@ -1378,4 +1415,4 @@ else:
                                     df_esp_ann.to_excel(writer, index=False, sheet_name=f"Totale_{mia_scheda}"[:31])
                                 st.download_button("📥 Scarica Gran Totale in Excel", data=buf_fa.getvalue(), file_name=f"GranTotale_{mia_scheda}.xlsx")
             else:
-                st.info("Non sono ancora presenti dati pubblicati per la tua filiale.")
+                st.info("Non sono ancora presenti dati pubblicati per questa filiale.")
