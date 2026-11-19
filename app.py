@@ -38,6 +38,26 @@ if "profilo" not in st.session_state:
 if "log_accesso_id" not in st.session_state:
     st.session_state.log_accesso_id = None
 
+# --- FILTRO FILIALI CONSENTITE PER ADMIN ---
+def get_filiali_consentite_admin(profilo_dict):
+    """
+    Restituisce None se l'admin può vedere TUTTE le filiali.
+    Altrimenti restituisce un set con i nomi normalizzati (maiuscoli) delle sole filiali assegnate.
+    """
+    raw = str(profilo_dict.get("nome_scheda_excel") or "").strip()
+    if not raw or raw.upper() in ("TUTTE", "ALL", "*"):
+        return None
+    lista = [x.strip().upper() for x in raw.split(",") if x.strip()]
+    return set(lista) if lista else None
+
+def filtra_records_per_admin(records, filiali_consentite_set):
+    if filiali_consentite_set is None:
+        return records
+    return [
+        r for r in records
+        if str(r.get("nome_scheda", "")).strip().upper() in filiali_consentite_set
+    ]
+
 # --- REGISTRAZIONE LOG ACCESSI (ORA IN / ORA OUT) ---
 def ora_italia_adesso():
     return datetime.now(ZoneInfo("Europe/Rome"))
@@ -753,8 +773,8 @@ def render_cambio_password_obbligatorio(profilo):
                     except Exception as e_chg:
                         st.error(f"Errore durante il salvataggio: {e_chg}")
 
-# --- HELPER SEZIONI CONDIVISE ---
-def render_sezione_anteprima(is_super_admin):
+# --- HELPER SEZIONI CONDIVISE (CON FILTRO PER FILIALI ASSEGNATE) ---
+def render_sezione_anteprima(is_super_admin, filiali_consentite=None):
     col_tit_ante, col_range_ante, col_spazio_ante = st.columns([1.4, 1.3, 1.3])
     with col_tit_ante:
         st.subheader("Verifica ed elimina dati pubblicati" if is_super_admin else "Verifica dati pubblicati")
@@ -762,7 +782,9 @@ def render_sezione_anteprima(is_super_admin):
         render_tabella_range_aliquote()
 
     admin_client = init_supabase_admin()
-    tutti = carica_tutti_dati_admin(admin_client, order_desc=True)
+    tutti_raw = carica_tutti_dati_admin(admin_client, order_desc=True)
+    tutti = filtra_records_per_admin(tutti_raw, filiali_consentite)
+
     if tutti:
         mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti]))
         if is_super_admin:
@@ -779,12 +801,13 @@ def render_sezione_anteprima(is_super_admin):
         dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
         render_scheda_pulita(dati_scelti, mostra_kpi=True)
     else:
-        st.info("Nessun dato ancora caricato.")
+        st.info("Nessun dato disponibile per le filiali assegnate.")
 
-def render_sezione_gran_totale():
+def render_sezione_gran_totale(filiali_consentite=None):
     st.subheader("📊 Gran Totale Annuale per Ufficio")
     admin_client = init_supabase_admin()
-    tutti_ann = carica_tutti_dati_admin(admin_client)
+    tutti_raw = carica_tutti_dati_admin(admin_client)
+    tutti_ann = filtra_records_per_admin(tutti_raw, filiali_consentite)
     
     if tutti_ann:
         mesi_disponibili = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_ann]))
@@ -819,12 +842,13 @@ def render_sezione_gran_totale():
             else:
                 st.warning("Nessun dato valido trovato per i mesi selezionati.")
     else:
-        st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
+        st.info("Nessun dato disponibile per visualizzare il Gran Totale.")
 
-def render_sezione_classifica():
+def render_sezione_classifica(filiali_consentite=None):
     st.subheader("🏆 Classifica Operatori")
     admin_client = init_supabase_admin()
-    tutti_op = carica_tutti_dati_admin(admin_client)
+    tutti_raw = carica_tutti_dati_admin(admin_client)
+    tutti_op = filtra_records_per_admin(tutti_raw, filiali_consentite)
 
     if tutti_op:
         mesi_op = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_op]))
@@ -833,17 +857,19 @@ def render_sezione_classifica():
             if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
         )), key=lambda x: x.lower())
 
+        etich_tutte = "Tutte le Filiali" if filiali_consentite is None else "Tutte le mie Filiali"
+
         c_op1, c_op2 = st.columns([2, 1])
         with c_op1:
             mesi_sel_op = st.multiselect("Mesi da sommare:", mesi_op, default=mesi_op, key="op_mesi_sel")
         with c_op2:
-            filtro_fil_op = st.selectbox("Filtra per Ufficio:", ["Tutte le Filiali"] + filiali_op, key="op_fil_sel")
+            filtro_fil_op = st.selectbox("Filtra per Ufficio:", [etich_tutte] + filiali_op, key="op_fil_sel")
 
         if mesi_sel_op:
             rec_filtrati = [
                 r for r in tutti_op
                 if r["mese_riferimento"] in mesi_sel_op
-                and (filtro_fil_op == "Tutte le Filiali" or r["nome_scheda"] == filtro_fil_op)
+                and (filtro_fil_op == etich_tutte or r["nome_scheda"] == filtro_fil_op)
             ]
             classifica = calcola_classifica_operatori(rec_filtrati)
 
@@ -872,7 +898,7 @@ def render_sezione_classifica():
             else:
                 st.warning("Nessun operatore trovato per i filtri selezionati.")
     else:
-        st.info("Carica almeno un file mensile per visualizzare la classifica.")
+        st.info("Nessun dato disponibile per visualizzare la classifica.")
 
 # --- SEZIONE LOG ACCESSI (SOLO PER francesco.pirrone@sbc.it) ---
 def render_sezione_log_accessi():
@@ -977,6 +1003,9 @@ else:
         st.write(f"Ruolo: `{ruolo.replace('_', ' ').upper()}`")
         if ruolo == "filiale":
             st.write(f"Filiale: **{profilo['nome_scheda_excel']}**")
+        elif ruolo == "admin":
+            fil_lbl = str(profilo.get("nome_scheda_excel") or "TUTTE").strip()
+            st.write(f"Filiali: **{fil_lbl}**")
         st.divider()
         if st.button("Esci (Logout)", use_container_width=True):
             logout()
@@ -986,6 +1015,7 @@ else:
     # ==========================================
     if ruolo in ("super_admin", "admin"):
         is_super = (ruolo == "super_admin")
+        filiali_consentite = None if is_super else get_filiali_consentite_admin(profilo)
 
         st.markdown(
             """
@@ -1141,7 +1171,7 @@ else:
                         c1, c2 = st.columns(2)
                         nuova_email = c1.text_input("Email utente")
                         nuova_pass = c1.text_input("Password provvisoria (min. 6 caratteri)", type="password")
-                        nome_scheda = c2.text_input("Nome esatto scheda Excel (es. Milazzo, oppure TUTTE per admin)")
+                        nome_scheda = c2.text_input("Scheda Excel (es. Milazzo, oppure Milazzo, Roma o TUTTE)")
                         nuovo_ruolo = c2.selectbox("Ruolo", ["filiale", "admin", "super_admin"])
                         if st.form_submit_button("Crea Utente"):
                             if nuova_email and len(nuova_pass) >= 6 and nome_scheda:
@@ -1196,10 +1226,49 @@ else:
                             else:
                                 st.warning("La password deve avere almeno 6 caratteri.")
 
+                    # --- ASSEGNAZIONE RAPIDA FILIALI AGLI UTENTI ADMIN ---
+                    utenti_admin_list = [u for u in utenti_res.data if str(u.get("ruolo", "")).strip().lower() == "admin"]
+                    if utenti_admin_list:
+                        st.divider()
+                        st.subheader("🏢 Assegna Filiali agli Utenti Admin")
+                        tutti_dati_f = carica_tutti_dati_admin(admin_client)
+                        filiali_esistenti = sorted(list(set(
+                            str(r["nome_scheda"]).strip() for r in tutti_dati_f
+                            if str(r.get("nome_scheda", "")).strip()
+                        )), key=lambda x: x.lower())
+
+                        opz_adm = {f"{u['email']}": u for u in utenti_admin_list}
+                        ca1, ca2, ca3 = st.columns([1.5, 2.5, 1])
+                        with ca1:
+                            adm_scelto_email = st.selectbox("Seleziona Admin:", list(opz_adm.keys()), key="sel_admin_fil")
+                            adm_obj = opz_adm[adm_scelto_email]
+                        with ca2:
+                            cur_raw = str(adm_obj.get("nome_scheda_excel") or "").strip()
+                            default_fils = []
+                            if cur_raw and cur_raw.upper() not in ("TUTTE", "ALL", "*"):
+                                mappa_case = {f.upper(): f for f in filiali_esistenti}
+                                default_fils = [mappa_case[x.strip().upper()] for x in cur_raw.split(",") if x.strip().upper() in mappa_case]
+                            fil_scelte_adm = st.multiselect(
+                                "Filiali visibili (lascia vuoto per TUTTE):",
+                                filiali_esistenti,
+                                default=default_fils,
+                                key="multi_fil_admin"
+                            )
+                        with ca3:
+                            st.write("")
+                            st.write("")
+                            if st.button("Salva Filiali", type="primary", use_container_width=True):
+                                nuovo_val = ", ".join(fil_scelte_adm) if fil_scelte_adm else "TUTTE"
+                                admin_client.table("profili_filiali").update({
+                                    "nome_scheda_excel": nuovo_val
+                                }).eq("id", adm_obj["id"]).execute()
+                                st.success(f"✅ Filiali aggiornate per {adm_scelto_email}: {nuovo_val}")
+                                st.rerun()
+
                     st.divider()
                     st.subheader("Utenti registrati")
                     df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel", "password_visibile", "must_change_password"]]
-                    df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata", "Password Attuale", "Stato Password"]
+                    df_utenti.columns = ["Email", "Ruolo", "Scheda / Filiali Associate", "Password Attuale", "Stato Password"]
                     df_utenti["Password Attuale"] = df_utenti["Password Attuale"].fillna("-")
                     df_utenti["Stato Password"] = df_utenti["Stato Password"].apply(lambda x: "⏳ Da cambiare" if x else "✅ Personale")
                     st.dataframe(df_utenti, use_container_width=True, hide_index=True)
@@ -1214,20 +1283,20 @@ else:
                             st.rerun()
 
             with tabs_sa[2]:
-                render_sezione_anteprima(is_super_admin=True)
+                render_sezione_anteprima(is_super_admin=True, filiali_consentite=None)
 
             with tabs_sa[3]:
-                render_sezione_gran_totale()
+                render_sezione_gran_totale(filiali_consentite=None)
 
             with tabs_sa[4]:
-                render_sezione_classifica()
+                render_sezione_classifica(filiali_consentite=None)
 
             if puo_vedere_log:
                 with tabs_sa[5]:
                     render_sezione_log_accessi()
 
         else:
-            # Ruolo: ADMIN (dopo aver impostato la password personale)
+            # Ruolo: ADMIN (vede solo le filiali assegnate nel proprio profilo)
             nomi_tabs_adm = [
                 "👀 Anteprima Dati",
                 "📊 Gran Totale Annuale",
@@ -1239,13 +1308,13 @@ else:
             tabs_adm = st.tabs(nomi_tabs_adm)
 
             with tabs_adm[0]:
-                render_sezione_anteprima(is_super_admin=False)
+                render_sezione_anteprima(is_super_admin=False, filiali_consentite=filiali_consentite)
 
             with tabs_adm[1]:
-                render_sezione_gran_totale()
+                render_sezione_gran_totale(filiali_consentite=filiali_consentite)
 
             with tabs_adm[2]:
-                render_sezione_classifica()
+                render_sezione_classifica(filiali_consentite=filiali_consentite)
 
             if puo_vedere_log:
                 with tabs_adm[3]:
