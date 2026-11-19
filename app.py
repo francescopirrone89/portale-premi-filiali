@@ -640,6 +640,127 @@ def render_tabella_range_aliquote():
     )
     st.markdown(html, unsafe_allow_html=True)
 
+# --- HELPER SEZIONI CONDIVISE TRA SUPER ADMIN E ADMIN ---
+def render_sezione_anteprima(is_super_admin):
+    col_tit_ante, col_range_ante, col_spazio_ante = st.columns([1.4, 1.3, 1.3])
+    with col_tit_ante:
+        st.subheader("Verifica ed elimina dati pubblicati" if is_super_admin else "Verifica dati pubblicati")
+    with col_range_ante:
+        render_tabella_range_aliquote()
+
+    admin_client = init_supabase_admin()
+    tutti = carica_tutti_dati_admin(admin_client, order_desc=True)
+    if tutti:
+        mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti]))
+        if is_super_admin:
+            cm1, cm2 = st.columns([3, 1])
+            mese_sel = cm1.selectbox("Seleziona periodo", mesi)
+            if cm2.button("🗑️ Elimina intero mese", use_container_width=True):
+                admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
+                st.rerun()
+        else:
+            mese_sel = st.selectbox("Seleziona periodo", mesi)
+
+        schede_m = [r for r in tutti if r["mese_riferimento"] == mese_sel]
+        scheda_sel = st.selectbox("Visualizza scheda", sorted([r["nome_scheda"] for r in schede_m], key=lambda x: x.lower()))
+        dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
+        render_scheda_pulita(dati_scelti, mostra_kpi=True)
+    else:
+        st.info("Nessun dato ancora caricato.")
+
+def render_sezione_gran_totale():
+    st.subheader("📊 Gran Totale Annuale per Ufficio")
+    admin_client = init_supabase_admin()
+    tutti_ann = carica_tutti_dati_admin(admin_client)
+    
+    if tutti_ann:
+        mesi_disponibili = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_ann]))
+        filiali_uniche = sorted(list(set(
+            r["nome_scheda"] for r in tutti_ann
+            if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
+        )), key=lambda x: x.lower())
+        
+        col_f1, col_f2 = st.columns([1, 2])
+        with col_f1:
+            fil_sel = st.selectbox("Seleziona l'Ufficio / Filiale:", filiali_uniche, key="ann_fil_sel")
+        with col_f2:
+            mesi_scelti_ann = st.multiselect("Mesi da sommare:", mesi_disponibili, default=mesi_disponibili, key="ann_mesi_sel")
+        
+        if fil_sel and mesi_scelti_ann:
+            lista_json_fil = [
+                r["dati_json"] for r in tutti_ann
+                if r["nome_scheda"] == fil_sel and r["mese_riferimento"] in mesi_scelti_ann
+            ]
+            gran_tot_res = calcola_gran_totale_filiale(lista_json_fil)
+            if gran_tot_res:
+                df_ann = render_scheda_pulita(gran_tot_res, mostra_kpi=False)
+                if df_ann is not None and not df_ann.empty:
+                    buf_a = io.BytesIO()
+                    with pd.ExcelWriter(buf_a, engine='openpyxl') as writer:
+                        df_ann.to_excel(writer, index=False, sheet_name=f"Totale_{fil_sel}"[:31])
+                    st.download_button(
+                        f"📥 Scarica Gran Totale {fil_sel} (Excel)",
+                        data=buf_a.getvalue(),
+                        file_name=f"GranTotale_{fil_sel}.xlsx"
+                    )
+            else:
+                st.warning("Nessun dato valido trovato per i mesi selezionati.")
+    else:
+        st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
+
+def render_sezione_classifica():
+    st.subheader("🏆 Classifica Operatori")
+    admin_client = init_supabase_admin()
+    tutti_op = carica_tutti_dati_admin(admin_client)
+
+    if tutti_op:
+        mesi_op = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_op]))
+        filiali_op = sorted(list(set(
+            r["nome_scheda"] for r in tutti_op
+            if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
+        )), key=lambda x: x.lower())
+
+        c_op1, c_op2 = st.columns([2, 1])
+        with c_op1:
+            mesi_sel_op = st.multiselect("Mesi da sommare:", mesi_op, default=mesi_op, key="op_mesi_sel")
+        with c_op2:
+            filtro_fil_op = st.selectbox("Filtra per Ufficio:", ["Tutte le Filiali"] + filiali_op, key="op_fil_sel")
+
+        if mesi_sel_op:
+            rec_filtrati = [
+                r for r in tutti_op
+                if r["mese_riferimento"] in mesi_sel_op
+                and (filtro_fil_op == "Tutte le Filiali" or r["nome_scheda"] == filtro_fil_op)
+            ]
+            classifica = calcola_classifica_operatori(rec_filtrati)
+
+            if classifica:
+                righe_classifica = [
+                    {
+                        "Pos.": f"{pos}°",
+                        "Operatore": item["Operatore"],
+                        "Filiale": item["Filiale"],
+                        "Totale (€)": fmt_euro(item["Totale (€)"])
+                    }
+                    for pos, item in enumerate(classifica, start=1)
+                ]
+
+                df_classifica = pd.DataFrame(righe_classifica)
+                st.dataframe(df_classifica, use_container_width=True, hide_index=True)
+
+                buf_op = io.BytesIO()
+                with pd.ExcelWriter(buf_op, engine='openpyxl') as writer:
+                    df_classifica.to_excel(writer, index=False, sheet_name="Classifica_Operatori")
+                st.download_button(
+                    "📥 Scarica Classifica Operatori (Excel)",
+                    data=buf_op.getvalue(),
+                    file_name="Classifica_Operatori_Totale.xlsx"
+                )
+            else:
+                st.warning("Nessun operatore trovato per i filtri selezionati.")
+    else:
+        st.info("Carica almeno un file mensile per visualizzare la classifica.")
+
 # --- AUTH ---
 def login(email, password):
     try:
@@ -668,10 +789,10 @@ if not st.session_state.user:
                 login(email, password)
 else:
     profilo = st.session_state.profilo
-    ruolo = profilo.get("ruolo", "filiale")
+    ruolo = str(profilo.get("ruolo", "filiale")).strip().lower()
     with st.sidebar:
         st.write(f"👤 **{profilo['email']}**")
-        st.write(f"Ruolo: `{ruolo.upper()}`")
+        st.write(f"Ruolo: `{ruolo.replace('_', ' ').upper()}`")
         if ruolo == "filiale":
             st.write(f"Filiale: **{profilo['nome_scheda_excel']}**")
         st.divider()
@@ -679,9 +800,11 @@ else:
             logout()
 
     # ==========================================
-    # PANNELLO ADMIN (CON OTTIMIZZAZIONE MOBILE DEDICATA)
+    # PANNELLO SUPER ADMIN E ADMIN
     # ==========================================
-    if ruolo == "admin":
+    if ruolo in ("super_admin", "admin"):
+        is_super = (ruolo == "super_admin")
+
         st.markdown(
             """
             <style>
@@ -719,303 +842,214 @@ else:
 
         col_head, col_mob_out = st.columns([4, 1])
         with col_head:
-            st.title("🛠️ Pannello Amministrazione")
+            st.title("🛠️ Pannello Super Amministrazione" if is_super else "🛠️ Pannello Amministrazione")
         with col_mob_out:
             st.markdown('<div class="admin-mobile-bar">', unsafe_allow_html=True)
             if st.button("🚪 Esci", key="mobile_logout_admin", use_container_width=True):
                 logout()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📤 Carica Excel Mensile",
-            "👥 Gestione Utenti e Filiali",
-            "👀 Gestione e Anteprima Dati",
-            "📊 Gran Totale Annuale",
-            "🏆 Classifica Operatori"
-        ])
-
-        with tab1:
-            st.subheader("Carica il riepilogo mensile")
-            mese_rif = st.text_input("Mese / Periodo di riferimento (es. Ottobre 2026)", placeholder="Es. Ottobre 2026")
-            uploaded_file = st.file_uploader("Seleziona il file Excel (.xlsx)", type=["xlsx"], key="upload_premi")
-            if uploaded_file and mese_rif and st.button("Elabora e Pubblica Schede", type="primary"):
-                try:
-                    file_bytes = uploaded_file.getvalue()
-                    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-                    schede_elaborate = []
-                    admin_client = init_supabase_admin()
-                    admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_rif.strip()).execute()
-                    for sheet_name in wb.sheetnames:
-                        ws = wb[sheet_name]
-                        nome_pulito = sheet_name.strip()
-                        test_h = str(ws.cell(row=2, column=3).value or "") + str(ws.cell(row=3, column=3).value or "")
-                        if nome_pulito.upper() == "TOTALI":
-                            dati_salvare = parse_foglio_generico_excel(ws, max_col_limit=34)
-                        elif "RA TOT" in test_h or "T+KM" in test_h:
-                            dati_salvare = parse_foglio_filiale(ws)
-                        else:
-                            dati_salvare = parse_foglio_generico_excel(ws)
-                        admin_client.table("dati_premi").insert({"mese_riferimento": mese_rif.strip(), "nome_scheda": nome_pulito, "dati_json": dati_salvare}).execute()
-                        schede_elaborate.append(nome_pulito)
-                    st.success(f"✅ Pubblicazione completata per **{mese_rif}**!")
-                    st.write("Schede divise e salvate:", ", ".join(schede_elaborate))
-                except Exception as e:
-                    st.error(f"Errore durante l'elaborazione: {e}")
-
-        with tab2:
-            st.subheader("📥 Importazione massiva utenti da Excel")
-            df_modello = pd.DataFrame([
-                {"email": "filiale.milazzo@azienda.it", "password": "Password123!", "nome_scheda_excel": "Milazzo"},
-                {"email": "filiale.roma@azienda.it", "password": "Password456!", "nome_scheda_excel": "Roma"}
+        if is_super:
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📤 Carica Excel Mensile",
+                "👥 Gestione Utenti e Filiali",
+                "👀 Gestione e Anteprima Dati",
+                "📊 Gran Totale Annuale",
+                "🏆 Classifica Operatori"
             ])
-            buf_modello = io.BytesIO()
-            with pd.ExcelWriter(buf_modello, engine='openpyxl') as writer:
-                df_modello.to_excel(writer, index=False, sheet_name="Utenti")
-            st.download_button("📄 Scarica file Excel di esempio", data=buf_modello.getvalue(), file_name="modello_importazione_utenti.xlsx")
 
-            file_utenti = st.file_uploader("Carica l'elenco utenti (.xlsx)", type=["xlsx"], key="upload_utenti")
-            if file_utenti and st.button("Importa e Aggiorna Tutti gli Utenti", type="primary"):
-                try:
-                    df_imp = pd.read_excel(file_utenti)
-                    df_imp.columns = [str(c).strip().lower() for c in df_imp.columns]
-                    if not {"email", "password", "nome_scheda_excel"}.issubset(set(df_imp.columns)):
-                        st.error("Colonne richieste: email, password, nome_scheda_excel")
-                    else:
-                        df_imp = df_imp.dropna(subset=["email", "password", "nome_scheda_excel"])
+            with tab1:
+                st.subheader("Carica il riepilogo mensile")
+                mese_rif = st.text_input("Mese / Periodo di riferimento (es. Ottobre 2026)", placeholder="Es. Ottobre 2026")
+                uploaded_file = st.file_uploader("Seleziona il file Excel (.xlsx)", type=["xlsx"], key="upload_premi")
+                if uploaded_file and mese_rif and st.button("Elabora e Pubblica Schede", type="primary"):
+                    try:
+                        file_bytes = uploaded_file.getvalue()
+                        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+                        schede_elaborate = []
                         admin_client = init_supabase_admin()
-                        esistenti_res = admin_client.table("profili_filiali").select("id, email").execute()
-                        mappa_esistenti = {u["email"].strip().lower(): u["id"] for u in (esistenti_res.data or [])}
+                        admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_rif.strip()).execute()
+                        for sheet_name in wb.sheetnames:
+                            ws = wb[sheet_name]
+                            nome_pulito = sheet_name.strip()
+                            test_h = str(ws.cell(row=2, column=3).value or "") + str(ws.cell(row=3, column=3).value or "")
+                            if nome_pulito.upper() == "TOTALI":
+                                dati_salvare = parse_foglio_generico_excel(ws, max_col_limit=34)
+                            elif "RA TOT" in test_h or "T+KM" in test_h:
+                                dati_salvare = parse_foglio_filiale(ws)
+                            else:
+                                dati_salvare = parse_foglio_generico_excel(ws)
+                            admin_client.table("dati_premi").insert({"mese_riferimento": mese_rif.strip(), "nome_scheda": nome_pulito, "dati_json": dati_salvare}).execute()
+                            schede_elaborate.append(nome_pulito)
+                        st.success(f"✅ Pubblicazione completata per **{mese_rif}**!")
+                        st.write("Schede divise e salvate:", ", ".join(schede_elaborate))
+                    except Exception as e:
+                        st.error(f"Errore durante l'elaborazione: {e}")
 
-                        creati, aggiornati, errori = 0, 0, []
-                        for _, row in df_imp.iterrows():
-                            em, pw, sc = str(row["email"]).strip(), str(row["password"]).strip(), str(row["nome_scheda_excel"]).strip()
-                            if len(pw) < 6:
-                                errori.append(f"{em}: password < 6 caratteri")
-                                continue
-                            try:
-                                if em.lower() in mappa_esistenti:
-                                    uid = mappa_esistenti[em.lower()]
-                                    admin_client.auth.admin.update_user_by_id(uid, {"password": pw})
-                                    admin_client.table("profili_filiali").update({
-                                        "nome_scheda_excel": sc,
-                                        "password_visibile": pw,
-                                        "must_change_password": True
-                                    }).eq("id", uid).execute()
-                                    aggiornati += 1
-                                else:
-                                    nu = admin_client.auth.admin.create_user({"email": em, "password": pw, "email_confirm": True})
-                                    admin_client.table("profili_filiali").insert({
-                                        "id": nu.user.id,
-                                        "email": em,
-                                        "ruolo": "filiale",
-                                        "nome_scheda_excel": sc,
-                                        "password_visibile": pw,
-                                        "must_change_password": True
-                                    }).execute()
-                                    creati += 1
-                            except Exception as ex_u:
-                                errori.append(f"{em}: {ex_u}")
-                        if creati > 0 or aggiornati > 0:
-                            st.success(f"✅ {creati} utenti creati, {aggiornati} utenti aggiornati!")
-                            st.rerun()
-                        for err in errori:
-                            st.warning(err)
-                except Exception as e:
-                    st.error(f"Errore lettura Excel: {e}")
+            with tab2:
+                st.subheader("📥 Importazione massiva utenti da Excel")
+                df_modello = pd.DataFrame([
+                    {"email": "filiale.milazzo@azienda.it", "password": "Password123!", "nome_scheda_excel": "Milazzo"},
+                    {"email": "filiale.roma@azienda.it", "password": "Password456!", "nome_scheda_excel": "Roma"}
+                ])
+                buf_modello = io.BytesIO()
+                with pd.ExcelWriter(buf_modello, engine='openpyxl') as writer:
+                    df_modello.to_excel(writer, index=False, sheet_name="Utenti")
+                st.download_button("📄 Scarica file Excel di esempio", data=buf_modello.getvalue(), file_name="modello_importazione_utenti.xlsx")
 
-            st.divider()
-            with st.expander("➕ Crea singolo account manualmente", expanded=False):
-                with st.form("nuovo_utente_form"):
-                    c1, c2 = st.columns(2)
-                    nuova_email = c1.text_input("Email utente")
-                    nuova_pass = c1.text_input("Password provvisoria (min. 6 caratteri)", type="password")
-                    nome_scheda = c2.text_input("Nome esatto scheda Excel (es. Milazzo)")
-                    nuovo_ruolo = c2.selectbox("Ruolo", ["filiale", "admin"])
-                    if st.form_submit_button("Crea Utente"):
-                        if nuova_email and len(nuova_pass) >= 6 and nome_scheda:
-                            try:
-                                admin_client = init_supabase_admin()
-                                nu = admin_client.auth.admin.create_user({"email": nuova_email.strip(), "password": nuova_pass, "email_confirm": True})
-                                admin_client.table("profili_filiali").insert({
-                                    "id": nu.user.id,
-                                    "email": nuova_email.strip(),
-                                    "ruolo": nuovo_ruolo,
-                                    "nome_scheda_excel": nome_scheda.strip(),
-                                    "password_visibile": nuova_pass,
-                                    "must_change_password": (nuovo_ruolo == "filiale")
-                                }).execute()
-                                st.success(f"Utente {nuova_email} creato!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Errore: {e}")
+                file_utenti = st.file_uploader("Carica l'elenco utenti (.xlsx)", type=["xlsx"], key="upload_utenti")
+                if file_utenti and st.button("Importa e Aggiorna Tutti gli Utenti", type="primary"):
+                    try:
+                        df_imp = pd.read_excel(file_utenti)
+                        df_imp.columns = [str(c).strip().lower() for c in df_imp.columns]
+                        if not {"email", "password", "nome_scheda_excel"}.issubset(set(df_imp.columns)):
+                            st.error("Colonne richieste: email, password, nome_scheda_excel")
                         else:
-                            st.warning("Compila tutti i campi.")
+                            df_imp = df_imp.dropna(subset=["email", "password", "nome_scheda_excel"])
+                            admin_client = init_supabase_admin()
+                            esistenti_res = admin_client.table("profili_filiali").select("id, email").execute()
+                            mappa_esistenti = {u["email"].strip().lower(): u["id"] for u in (esistenti_res.data or [])}
 
-            st.divider()
-            st.subheader("🔑 Visualizza e Cambia Password Utente")
-            admin_client = init_supabase_admin()
-            utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel, password_visibile, must_change_password").order("email").execute()
-
-            if utenti_res.data:
-                opzioni_pw = {f"{u['email']} ({u['nome_scheda_excel']})": u for u in utenti_res.data}
-                col_p1, col_p2, col_p3 = st.columns([2, 1.5, 1])
-                with col_p1:
-                    utente_scelto_label = st.selectbox("Seleziona utente:", list(opzioni_pw.keys()), key="sel_utente_pw")
-                    utente_scelto = opzioni_pw[utente_scelto_label]
-                    pw_attuale = utente_scelto.get("password_visibile") or "Non salvata"
-                    st.caption(f"Password attuale registrata: **`{pw_attuale}`**")
-                with col_p2:
-                    nuova_pw_reset = st.text_input("Nuova password provvisoria (min. 6 caratteri)", key="input_nuova_pw")
-                with col_p3:
-                    st.write("")
-                    st.write("")
-                    if st.button("Aggiorna Password", type="primary", use_container_width=True):
-                        if len(nuova_pw_reset.strip()) >= 6:
-                            try:
-                                admin_client.auth.admin.update_user_by_id(utente_scelto["id"], {"password": nuova_pw_reset.strip()})
-                                admin_client.table("profili_filiali").update({
-                                    "password_visibile": nuova_pw_reset.strip(),
-                                    "must_change_password": (utente_scelto["ruolo"] == "filiale")
-                                }).eq("id", utente_scelto["id"]).execute()
-                                st.success(f"✅ Password aggiornata per {utente_scelto['email']}!")
+                            creati, aggiornati, errori = 0, 0, []
+                            for _, row in df_imp.iterrows():
+                                em, pw, sc = str(row["email"]).strip(), str(row["password"]).strip(), str(row["nome_scheda_excel"]).strip()
+                                if len(pw) < 6:
+                                    errori.append(f"{em}: password < 6 caratteri")
+                                    continue
+                                try:
+                                    if em.lower() in mappa_esistenti:
+                                        uid = mappa_esistenti[em.lower()]
+                                        admin_client.auth.admin.update_user_by_id(uid, {"password": pw})
+                                        admin_client.table("profili_filiali").update({
+                                            "nome_scheda_excel": sc,
+                                            "password_visibile": pw,
+                                            "must_change_password": True
+                                        }).eq("id", uid).execute()
+                                        aggiornati += 1
+                                    else:
+                                        nu = admin_client.auth.admin.create_user({"email": em, "password": pw, "email_confirm": True})
+                                        admin_client.table("profili_filiali").insert({
+                                            "id": nu.user.id,
+                                            "email": em,
+                                            "ruolo": "filiale",
+                                            "nome_scheda_excel": sc,
+                                            "password_visibile": pw,
+                                            "must_change_password": True
+                                        }).execute()
+                                        creati += 1
+                                except Exception as ex_u:
+                                    errori.append(f"{em}: {ex_u}")
+                            if creati > 0 or aggiornati > 0:
+                                st.success(f"✅ {creati} utenti creati, {aggiornati} utenti aggiornati!")
                                 st.rerun()
-                            except Exception as e_pw:
-                                st.error(f"Errore aggiornamento password: {e_pw}")
-                        else:
-                            st.warning("La password deve avere almeno 6 caratteri.")
+                            for err in errori:
+                                st.warning(err)
+                    except Exception as e:
+                        st.error(f"Errore lettura Excel: {e}")
 
                 st.divider()
-                st.subheader("Utenti registrati")
-                df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel", "password_visibile", "must_change_password"]]
-                df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata", "Password Attuale", "Stato Password"]
-                df_utenti["Password Attuale"] = df_utenti["Password Attuale"].fillna("-")
-                df_utenti["Stato Password"] = df_utenti["Stato Password"].apply(lambda x: "⏳ Da cambiare" if x else "✅ Personale")
-                st.dataframe(df_utenti, use_container_width=True, hide_index=True)
+                with st.expander("➕ Crea singolo account manualmente", expanded=False):
+                    with st.form("nuovo_utente_form"):
+                        c1, c2 = st.columns(2)
+                        nuova_email = c1.text_input("Email utente")
+                        nuova_pass = c1.text_input("Password provvisoria (min. 6 caratteri)", type="password")
+                        nome_scheda = c2.text_input("Nome esatto scheda Excel (es. Milazzo)")
+                        nuovo_ruolo = c2.selectbox("Ruolo", ["filiale", "admin", "super_admin"])
+                        if st.form_submit_button("Crea Utente"):
+                            if nuova_email and len(nuova_pass) >= 6 and nome_scheda:
+                                try:
+                                    admin_client = init_supabase_admin()
+                                    nu = admin_client.auth.admin.create_user({"email": nuova_email.strip(), "password": nuova_pass, "email_confirm": True})
+                                    admin_client.table("profili_filiali").insert({
+                                        "id": nu.user.id,
+                                        "email": nuova_email.strip(),
+                                        "ruolo": nuovo_ruolo,
+                                        "nome_scheda_excel": nome_scheda.strip(),
+                                        "password_visibile": nuova_pass,
+                                        "must_change_password": (nuovo_ruolo == "filiale")
+                                    }).execute()
+                                    st.success(f"Utente {nuova_email} creato!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Errore: {e}")
+                            else:
+                                st.warning("Compila tutti i campi.")
 
-                altri = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
-                if altri:
-                    opzioni = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri}
-                    cd1, cd2 = st.columns([3, 1])
-                    u_del = cd1.selectbox("Rimuovi account", list(opzioni.keys()), label_visibility="collapsed")
-                    if cd2.button("Elimina Utente", use_container_width=True):
-                        admin_client.auth.admin.delete_user(opzioni[u_del])
-                        st.rerun()
+                st.divider()
+                st.subheader("🔑 Visualizza e Cambia Password Utente")
+                admin_client = init_supabase_admin()
+                utenti_res = admin_client.table("profili_filiali").select("id, email, ruolo, nome_scheda_excel, password_visibile, must_change_password").order("email").execute()
 
-        with tab3:
-            col_tit_ante, col_range_ante, col_spazio_ante = st.columns([1.4, 1.3, 1.3])
-            with col_tit_ante:
-                st.subheader("Verifica ed elimina dati pubblicati")
-            with col_range_ante:
-                render_tabella_range_aliquote()
+                if utenti_res.data:
+                    opzioni_pw = {f"{u['email']} ({u['nome_scheda_excel']})": u for u in utenti_res.data}
+                    col_p1, col_p2, col_p3 = st.columns([2, 1.5, 1])
+                    with col_p1:
+                        utente_scelto_label = st.selectbox("Seleziona utente:", list(opzioni_pw.keys()), key="sel_utente_pw")
+                        utente_scelto = opzioni_pw[utente_scelto_label]
+                        pw_attuale = utente_scelto.get("password_visibile") or "Non salvata"
+                        st.caption(f"Password attuale registrata: **`{pw_attuale}`**")
+                    with col_p2:
+                        nuova_pw_reset = st.text_input("Nuova password provvisoria (min. 6 caratteri)", key="input_nuova_pw")
+                    with col_p3:
+                        st.write("")
+                        st.write("")
+                        if st.button("Aggiorna Password", type="primary", use_container_width=True):
+                            if len(nuova_pw_reset.strip()) >= 6:
+                                try:
+                                    admin_client.auth.admin.update_user_by_id(utente_scelto["id"], {"password": nuova_pw_reset.strip()})
+                                    admin_client.table("profili_filiali").update({
+                                        "password_visibile": nuova_pw_reset.strip(),
+                                        "must_change_password": (utente_scelto["ruolo"] == "filiale")
+                                    }).eq("id", utente_scelto["id"]).execute()
+                                    st.success(f"✅ Password aggiornata per {utente_scelto['email']}!")
+                                    st.rerun()
+                                except Exception as e_pw:
+                                    st.error(f"Errore aggiornamento password: {e_pw}")
+                            else:
+                                st.warning("La password deve avere almeno 6 caratteri.")
 
-            admin_client = init_supabase_admin()
-            tutti = carica_tutti_dati_admin(admin_client, order_desc=True)
-            if tutti:
-                mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti]))
-                cm1, cm2 = st.columns([3, 1])
-                mese_sel = cm1.selectbox("Seleziona periodo", mesi)
-                if cm2.button("🗑️ Elimina intero mese", use_container_width=True):
-                    admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
-                    st.rerun()
-                schede_m = [r for r in tutti if r["mese_riferimento"] == mese_sel]
-                scheda_sel = st.selectbox("Visualizza scheda", sorted([r["nome_scheda"] for r in schede_m], key=lambda x: x.lower()))
-                dati_scelti = next(r["dati_json"] for r in schede_m if r["nome_scheda"] == scheda_sel)
-                render_scheda_pulita(dati_scelti, mostra_kpi=True)
-            else:
-                st.info("Nessun dato ancora caricato.")
+                    st.divider()
+                    st.subheader("Utenti registrati")
+                    df_utenti = pd.DataFrame(utenti_res.data)[["email", "ruolo", "nome_scheda_excel", "password_visibile", "must_change_password"]]
+                    df_utenti.columns = ["Email", "Ruolo", "Scheda Excel Associata", "Password Attuale", "Stato Password"]
+                    df_utenti["Password Attuale"] = df_utenti["Password Attuale"].fillna("-")
+                    df_utenti["Stato Password"] = df_utenti["Stato Password"].apply(lambda x: "⏳ Da cambiare" if x else "✅ Personale")
+                    st.dataframe(df_utenti, use_container_width=True, hide_index=True)
 
-        with tab4:
-            st.subheader("📊 Gran Totale Annuale per Ufficio")
-            admin_client = init_supabase_admin()
-            tutti_ann = carica_tutti_dati_admin(admin_client)
-            
-            if tutti_ann:
-                mesi_disponibili = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_ann]))
-                filiali_uniche = sorted(list(set(
-                    r["nome_scheda"] for r in tutti_ann
-                    if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
-                )), key=lambda x: x.lower())
-                
-                col_f1, col_f2 = st.columns([1, 2])
-                with col_f1:
-                    fil_sel = st.selectbox("Seleziona l'Ufficio / Filiale:", filiali_uniche, key="ann_fil_sel")
-                with col_f2:
-                    mesi_scelti_ann = st.multiselect("Mesi da sommare:", mesi_disponibili, default=mesi_disponibili, key="ann_mesi_sel")
-                
-                if fil_sel and mesi_scelti_ann:
-                    lista_json_fil = [
-                        r["dati_json"] for r in tutti_ann
-                        if r["nome_scheda"] == fil_sel and r["mese_riferimento"] in mesi_scelti_ann
-                    ]
-                    gran_tot_res = calcola_gran_totale_filiale(lista_json_fil)
-                    if gran_tot_res:
-                        df_ann = render_scheda_pulita(gran_tot_res, mostra_kpi=False)
-                        if df_ann is not None and not df_ann.empty:
-                            buf_a = io.BytesIO()
-                            with pd.ExcelWriter(buf_a, engine='openpyxl') as writer:
-                                df_ann.to_excel(writer, index=False, sheet_name=f"Totale_{fil_sel}"[:31])
-                            st.download_button(
-                                f"📥 Scarica Gran Totale {fil_sel} (Excel)",
-                                data=buf_a.getvalue(),
-                                file_name=f"GranTotale_{fil_sel}.xlsx"
-                            )
-                    else:
-                        st.warning("Nessun dato valido trovato per i mesi selezionati.")
-            else:
-                st.info("Carica almeno un file mensile per visualizzare il Gran Totale.")
+                    altri = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
+                    if altri:
+                        opzioni = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri}
+                        cd1, cd2 = st.columns([3, 1])
+                        u_del = cd1.selectbox("Rimuovi account", list(opzioni.keys()), label_visibility="collapsed")
+                        if cd2.button("Elimina Utente", use_container_width=True):
+                            admin_client.auth.admin.delete_user(opzioni[u_del])
+                            st.rerun()
 
-        with tab5:
-            st.subheader("🏆 Classifica Operatori")
-            admin_client = init_supabase_admin()
-            tutti_op = carica_tutti_dati_admin(admin_client)
+            with tab3:
+                render_sezione_anteprima(is_super_admin=True)
 
-            if tutti_op:
-                mesi_op = list(dict.fromkeys([r["mese_riferimento"] for r in tutti_op]))
-                filiali_op = sorted(list(set(
-                    r["nome_scheda"] for r in tutti_op
-                    if isinstance(r["dati_json"], dict) and "righe" in r["dati_json"]
-                )), key=lambda x: x.lower())
+            with tab4:
+                render_sezione_gran_totale()
 
-                c_op1, c_op2 = st.columns([2, 1])
-                with c_op1:
-                    mesi_sel_op = st.multiselect("Mesi da sommare:", mesi_op, default=mesi_op, key="op_mesi_sel")
-                with c_op2:
-                    filtro_fil_op = st.selectbox("Filtra per Ufficio:", ["Tutte le Filiali"] + filiali_op, key="op_fil_sel")
+            with tab5:
+                render_sezione_classifica()
 
-                if mesi_sel_op:
-                    rec_filtrati = [
-                        r for r in tutti_op
-                        if r["mese_riferimento"] in mesi_sel_op
-                        and (filtro_fil_op == "Tutte le Filiali" or r["nome_scheda"] == filtro_fil_op)
-                    ]
-                    classifica = calcola_classifica_operatori(rec_filtrati)
+        else:
+            # Ruolo: ADMIN (solo consultazione, Gran Totale Annuale e Classifica Operatori)
+            tab_a1, tab_a2, tab_a3 = st.tabs([
+                "👀 Anteprima Dati",
+                "📊 Gran Totale Annuale",
+                "🏆 Classifica Operatori"
+            ])
 
-                    if classifica:
-                        righe_classifica = [
-                            {
-                                "Pos.": f"{pos}°",
-                                "Operatore": item["Operatore"],
-                                "Filiale": item["Filiale"],
-                                "Totale (€)": fmt_euro(item["Totale (€)"])
-                            }
-                            for pos, item in enumerate(classifica, start=1)
-                        ]
+            with tab_a1:
+                render_sezione_anteprima(is_super_admin=False)
 
-                        df_classifica = pd.DataFrame(righe_classifica)
-                        st.dataframe(df_classifica, use_container_width=True, hide_index=True)
+            with tab_a2:
+                render_sezione_gran_totale()
 
-                        buf_op = io.BytesIO()
-                        with pd.ExcelWriter(buf_op, engine='openpyxl') as writer:
-                            df_classifica.to_excel(writer, index=False, sheet_name="Classifica_Operatori")
-                        st.download_button(
-                            "📥 Scarica Classifica Operatori (Excel)",
-                            data=buf_op.getvalue(),
-                            file_name="Classifica_Operatori_Totale.xlsx"
-                        )
-                    else:
-                        st.warning("Nessun operatore trovato per i filtri selezionati.")
-            else:
-                st.info("Carica almeno un file mensile per visualizzare la classifica.")
+            with tab_a3:
+                render_sezione_classifica()
 
     # ==========================================
     # PANNELLO FILIALE (CON CAMBIO PASSWORD OBBLIGATORIO AL PRIMO ACCESSO)
