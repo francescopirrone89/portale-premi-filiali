@@ -181,7 +181,7 @@ def fmt_perc(val, show_sign=False):
     return f"{sign}{num:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def fmt_perc_diretta(val):
-    """Formatta un valore già espresso su scala 0-100 (es. 23,19 -> '23,19%')."""
+    """Formatta un valore già espresso su scala 0-100 (es. 72,33 -> '72,33%')."""
     num = to_float(val)
     if num is None:
         return ""
@@ -624,7 +624,7 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- CLASSIFICA OPERATORI PER INCIDENZA (TOTALE OPERATORE / TOTALE COMPLESSIVO) ---
+# --- CLASSIFICA OPERATORI PER INCIDENZA (TOTALE OPERATORE / TOTALE UFFICIO DI APPARTENENZA) ---
 def calcola_classifica_incidenza_operatori(records_filtrati):
     per_filiale = {}
     for rec in records_filtrati:
@@ -633,19 +633,26 @@ def calcola_classifica_incidenza_operatori(records_filtrati):
         if isinstance(d_json, dict) and "righe" in d_json:
             per_filiale.setdefault(fil, []).append(d_json)
 
+    totale_per_filiale = {}
     agg_op = {}
-    totale_complessivo_generale = 0.0
 
     for fil, lista_json in per_filiale.items():
         gt = calcola_gran_totale_filiale(lista_json)
         if not gt or "righe" not in gt:
             continue
+
+        tot_ufficio = 0.0
         for riga in gt["righe"]:
             op = str(riga.get("Operatore", "")).strip()
-            if not op or "totale" in op.lower():
+            if not op:
+                continue
+            if "totale" in op.lower():
+                tot_ufficio = to_float(riga.get("Totale (€)")) or tot_ufficio
                 continue
 
             val_tot_op = to_float(riga.get("Totale (€)")) or 0.0
+            tot_ufficio_calc = val_tot_op
+
             chiave = " ".join(op.upper().split())
             if chiave not in agg_op:
                 agg_op[chiave] = {
@@ -656,15 +663,24 @@ def calcola_classifica_incidenza_operatori(records_filtrati):
             if fil:
                 agg_op[chiave]["Filiali"].add(fil)
             agg_op[chiave]["Totale (€)"] += val_tot_op
-            totale_complessivo_generale += val_tot_op
+
+        if tot_ufficio <= 0:
+            tot_ufficio = sum(
+                (to_float(r.get("Totale (€)")) or 0.0)
+                for r in gt["righe"]
+                if "totale" not in str(r.get("Operatore", "")).lower()
+            )
+        totale_per_filiale[fil] = tot_ufficio
 
     risultati = []
     for v in agg_op.values():
-        incid_perc = (v["Totale (€)"] / totale_complessivo_generale * 100.0) if totale_complessivo_generale > 0 else 0.0
+        tot_uffici_op = sum(totale_per_filiale.get(f, 0.0) for f in v["Filiali"])
+        incid_perc = (v["Totale (€)"] / tot_uffici_op * 100.0) if tot_uffici_op > 0 else 0.0
         risultati.append({
             "Operatore": v["Operatore"],
             "Filiale": ", ".join(sorted(v["Filiali"])),
             "Totale (€)": v["Totale (€)"],
+            "Totale Ufficio (€)": tot_uffici_op,
             "Incidenza (%)": incid_perc
         })
 
@@ -990,8 +1006,9 @@ def render_sezione_classifica_incidenza(filiali_consentite=None):
                         "Pos.": f"{pos}°",
                         "Operatore": item["Operatore"],
                         "Filiale": item["Filiale"],
-                        "Totale (€)": fmt_euro(item["Totale (€)"]),
-                        "% Operatore": fmt_perc_diretta(item["Incidenza (%)"])
+                        "Totale Operatore (€)": fmt_euro(item["Totale (€)"]),
+                        "Totale Ufficio (€)": fmt_euro(item["Totale Ufficio (€)"]),
+                        "% Incidenza": fmt_perc_diretta(item["Incidenza (%)"])
                     }
                     for pos, item in enumerate(classifica_inc, start=1)
                 ]
