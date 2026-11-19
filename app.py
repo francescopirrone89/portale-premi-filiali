@@ -624,50 +624,48 @@ def calcola_classifica_operatori(records_filtrati):
     ]
     return sorted(risultati, key=lambda x: x["Totale (€)"], reverse=True)
 
-# --- CLASSIFICA OPERATORI PER INCIDENZA (% OPERATORE) ---
+# --- CLASSIFICA OPERATORI PER INCIDENZA (TOTALE OPERATORE / TOTALE COMPLESSIVO) ---
 def calcola_classifica_incidenza_operatori(records_filtrati):
-    agg_op = {}
+    per_filiale = {}
     for rec in records_filtrati:
         fil = str(rec.get("nome_scheda", "")).strip()
         d_json = rec.get("dati_json", {})
-        if not isinstance(d_json, dict) or "righe" not in d_json:
-            continue
+        if isinstance(d_json, dict) and "righe" in d_json:
+            per_filiale.setdefault(fil, []).append(d_json)
 
-        for riga in d_json["righe"]:
+    agg_op = {}
+    totale_complessivo_generale = 0.0
+
+    for fil, lista_json in per_filiale.items():
+        gt = calcola_gran_totale_filiale(lista_json)
+        if not gt or "righe" not in gt:
+            continue
+        for riga in gt["righe"]:
             op = str(riga.get("Operatore", "")).strip()
             if not op or "totale" in op.lower():
                 continue
 
-            val_perc = to_float(riga.get("% Operatore"))
-            if val_perc is None:
-                continue
-
-            # Normalizza su scala 0-100 se salvato come decimale puro (es. 0.2319 -> 23.19)
-            raw_str = str(riga.get("% Operatore", ""))
-            if "%" not in raw_str and abs(val_perc) <= 1.0 and val_perc != 0:
-                val_perc = val_perc * 100.0
-
+            val_tot_op = to_float(riga.get("Totale (€)")) or 0.0
             chiave = " ".join(op.upper().split())
             if chiave not in agg_op:
                 agg_op[chiave] = {
                     "Operatore": op,
                     "Filiali": set(),
-                    "Valori": []
+                    "Totale (€)": 0.0
                 }
             if fil:
                 agg_op[chiave]["Filiali"].add(fil)
-            agg_op[chiave]["Valori"].append(val_perc)
+            agg_op[chiave]["Totale (€)"] += val_tot_op
+            totale_complessivo_generale += val_tot_op
 
     risultati = []
     for v in agg_op.values():
-        if not v["Valori"]:
-            continue
-        media_incid = sum(v["Valori"]) / len(v["Valori"])
+        incid_perc = (v["Totale (€)"] / totale_complessivo_generale * 100.0) if totale_complessivo_generale > 0 else 0.0
         risultati.append({
             "Operatore": v["Operatore"],
             "Filiale": ", ".join(sorted(v["Filiali"])),
-            "Incidenza (%)": media_incid,
-            "Mesi Rilevati": len(v["Valori"])
+            "Totale (€)": v["Totale (€)"],
+            "Incidenza (%)": incid_perc
         })
 
     return sorted(risultati, key=lambda x: x["Incidenza (%)"], reverse=True)
@@ -974,7 +972,7 @@ def render_sezione_classifica_incidenza(filiali_consentite=None):
 
         c_inc1, c_inc2 = st.columns([2, 1])
         with c_inc1:
-            mesi_sel_inc = st.multiselect("Mesi da considerare:", mesi_inc, default=mesi_inc, key="op_inc_mesi_sel")
+            mesi_sel_inc = st.multiselect("Mesi da sommare:", mesi_inc, default=mesi_inc, key="op_inc_mesi_sel")
         with c_inc2:
             filtro_fil_inc = st.selectbox("Filtra per Ufficio:", [etich_tutte] + filiali_inc, key="op_inc_fil_sel")
 
@@ -992,7 +990,8 @@ def render_sezione_classifica_incidenza(filiali_consentite=None):
                         "Pos.": f"{pos}°",
                         "Operatore": item["Operatore"],
                         "Filiale": item["Filiale"],
-                        "% Operatore (Media)" if len(mesi_sel_inc) > 1 else "% Operatore": fmt_perc_diretta(item["Incidenza (%)"])
+                        "Totale (€)": fmt_euro(item["Totale (€)"]),
+                        "% Operatore": fmt_perc_diretta(item["Incidenza (%)"])
                     }
                     for pos, item in enumerate(classifica_inc, start=1)
                 ]
