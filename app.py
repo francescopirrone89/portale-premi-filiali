@@ -48,7 +48,6 @@ def registra_log_ingresso(user_obj, profilo_dict):
         adesso = ora_italia_adesso()
         email_u = str(profilo_dict.get("email") or getattr(user_obj, "email", "")).strip()
 
-        # Chiude eventuali sessioni precedenti rimaste aperte senza cliccare Logout
         admin_client.table("log_accessi").update({
             "ora_out": adesso.strftime("%H:%M:%S")
         }).eq("email", email_u).is_("ora_out", "null").execute()
@@ -714,6 +713,46 @@ def render_tabella_range_aliquote():
     )
     st.markdown(html, unsafe_allow_html=True)
 
+# --- SCHERMATA CAMBIO PASSWORD OBBLIGATORIO (PER FILIALI E ADMIN) ---
+def render_cambio_password_obbligatorio(profilo):
+    etichetta = profilo.get("nome_scheda_excel") or profilo.get("email")
+    _, col_pw, _ = st.columns([1, 1.6, 1])
+    with col_pw:
+        st.title("🔐 Cambio Password Obbligatorio")
+        st.info(
+            f"Benvenuto **{etichetta}**! Per motivi di sicurezza, al primo accesso è necessario "
+            "sostituire la password provvisoria con una password personale."
+        )
+        with st.form("cambio_password_primo_accesso"):
+            pw_nuova_1 = st.text_input("Nuova password (min. 6 caratteri)", type="password")
+            pw_nuova_2 = st.text_input("Conferma nuova password", type="password")
+            if st.form_submit_button("Salva nuova password e accedi", type="primary", use_container_width=True):
+                pw1 = pw_nuova_1.strip()
+                pw2 = pw_nuova_2.strip()
+                pw_vecchia = str(profilo.get("password_visibile") or "").strip()
+
+                if len(pw1) < 6:
+                    st.error("La password deve contenere almeno 6 caratteri.")
+                elif pw1 != pw2:
+                    st.error("Le due password non coincidono.")
+                elif pw_vecchia and pw1 == pw_vecchia:
+                    st.error("La nuova password deve essere diversa da quella provvisoria.")
+                else:
+                    try:
+                        admin_client = init_supabase_admin()
+                        admin_client.auth.admin.update_user_by_id(st.session_state.user.id, {"password": pw1})
+                        admin_client.table("profili_filiali").update({
+                            "password_visibile": pw1,
+                            "must_change_password": False
+                        }).eq("id", st.session_state.user.id).execute()
+
+                        st.session_state.profilo["password_visibile"] = pw1
+                        st.session_state.profilo["must_change_password"] = False
+                        st.success("✅ Password aggiornata con successo! Accesso in corso...")
+                        st.rerun()
+                    except Exception as e_chg:
+                        st.error(f"Errore durante il salvataggio: {e_chg}")
+
 # --- HELPER SEZIONI CONDIVISE ---
 def render_sezione_anteprima(is_super_admin):
     col_tit_ante, col_range_ante, col_spazio_ante = st.columns([1.4, 1.3, 1.3])
@@ -931,6 +970,7 @@ else:
     ruolo = str(profilo.get("ruolo", "filiale")).strip().lower()
     email_corrente = str(profilo.get("email", "")).strip().lower()
     puo_vedere_log = (email_corrente == EMAIL_LOG_AUTORIZZATO)
+    must_change = bool(profilo.get("must_change_password", False))
 
     with st.sidebar:
         st.write(f"👤 **{profilo['email']}**")
@@ -991,7 +1031,9 @@ else:
                 logout()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        if is_super:
+        if not is_super and must_change:
+            render_cambio_password_obbligatorio(profilo)
+        elif is_super:
             nomi_tabs = [
                 "📤 Carica Excel Mensile",
                 "👥 Gestione Utenti e Filiali",
@@ -1099,7 +1141,7 @@ else:
                         c1, c2 = st.columns(2)
                         nuova_email = c1.text_input("Email utente")
                         nuova_pass = c1.text_input("Password provvisoria (min. 6 caratteri)", type="password")
-                        nome_scheda = c2.text_input("Nome esatto scheda Excel (es. Milazzo)")
+                        nome_scheda = c2.text_input("Nome esatto scheda Excel (es. Milazzo, oppure TUTTE per admin)")
                         nuovo_ruolo = c2.selectbox("Ruolo", ["filiale", "admin", "super_admin"])
                         if st.form_submit_button("Crea Utente"):
                             if nuova_email and len(nuova_pass) >= 6 and nome_scheda:
@@ -1112,7 +1154,7 @@ else:
                                         "ruolo": nuovo_ruolo,
                                         "nome_scheda_excel": nome_scheda.strip(),
                                         "password_visibile": nuova_pass,
-                                        "must_change_password": (nuovo_ruolo == "filiale")
+                                        "must_change_password": (nuovo_ruolo in ("filiale", "admin"))
                                     }).execute()
                                     st.success(f"Utente {nuova_email} creato!")
                                     st.rerun()
@@ -1145,7 +1187,7 @@ else:
                                     admin_client.auth.admin.update_user_by_id(utente_scelto["id"], {"password": nuova_pw_reset.strip()})
                                     admin_client.table("profili_filiali").update({
                                         "password_visibile": nuova_pw_reset.strip(),
-                                        "must_change_password": (utente_scelto["ruolo"] == "filiale")
+                                        "must_change_password": (utente_scelto["ruolo"] in ("filiale", "admin"))
                                     }).eq("id", utente_scelto["id"]).execute()
                                     st.success(f"✅ Password aggiornata per {utente_scelto['email']}!")
                                     st.rerun()
@@ -1185,7 +1227,7 @@ else:
                     render_sezione_log_accessi()
 
         else:
-            # Ruolo: ADMIN
+            # Ruolo: ADMIN (dopo aver impostato la password personale)
             nomi_tabs_adm = [
                 "👀 Anteprima Dati",
                 "📊 Gran Totale Annuale",
@@ -1232,45 +1274,10 @@ else:
         )
 
         mia_scheda = profilo["nome_scheda_excel"]
-        must_change = profilo.get("must_change_password", True)
+        must_change_filiale = profilo.get("must_change_password", True)
 
-        if must_change:
-            _, col_pw, _ = st.columns([1, 1.6, 1])
-            with col_pw:
-                st.title("🔐 Cambio Password Obbligatorio")
-                st.info(
-                    f"Benvenuto **{mia_scheda}**! Per motivi di sicurezza, al primo accesso è necessario "
-                    "sostituire la password provvisoria con una password personale."
-                )
-                with st.form("cambio_password_primo_accesso"):
-                    pw_nuova_1 = st.text_input("Nuova password (min. 6 caratteri)", type="password")
-                    pw_nuova_2 = st.text_input("Conferma nuova password", type="password")
-                    if st.form_submit_button("Salva nuova password e accedi", type="primary", use_container_width=True):
-                        pw1 = pw_nuova_1.strip()
-                        pw2 = pw_nuova_2.strip()
-                        pw_vecchia = str(profilo.get("password_visibile") or "").strip()
-
-                        if len(pw1) < 6:
-                            st.error("La password deve contenere almeno 6 caratteri.")
-                        elif pw1 != pw2:
-                            st.error("Le due password non coincidono.")
-                        elif pw_vecchia and pw1 == pw_vecchia:
-                            st.error("La nuova password deve essere diversa da quella provvisoria.")
-                        else:
-                            try:
-                                admin_client = init_supabase_admin()
-                                admin_client.auth.admin.update_user_by_id(st.session_state.user.id, {"password": pw1})
-                                admin_client.table("profili_filiali").update({
-                                    "password_visibile": pw1,
-                                    "must_change_password": False
-                                }).eq("id", st.session_state.user.id).execute()
-
-                                st.session_state.profilo["password_visibile"] = pw1
-                                st.session_state.profilo["must_change_password"] = False
-                                st.success("✅ Password aggiornata con successo! Accesso in corso...")
-                                st.rerun()
-                            except Exception as e_chg:
-                                st.error(f"Errore durante il salvataggio: {e_chg}")
+        if must_change_filiale:
+            render_cambio_password_obbligatorio(profilo)
         else:
             st.title(f"📊 Riepilogo Premi - {mia_scheda}")
             dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
