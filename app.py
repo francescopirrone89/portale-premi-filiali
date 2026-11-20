@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import openpyxl
 from supabase import create_client
@@ -43,7 +44,7 @@ if "profilo" not in st.session_state:
 if "log_accesso_id" not in st.session_state:
     st.session_state.log_accesso_id = None
 
-# --- STILE RESPONSIVE UNIVERSALE + SIDEBAR COMPATTA + VISIBILITÀ BARRE ---
+# --- STILE RESPONSIVE UNIVERSALE + SIDEBAR COMPATTA + RIMOZIONE BADGE STREAMLIT ---
 def applica_stile_interfaccia_utente():
     profilo_corr = st.session_state.get("profilo") or {}
     email_corr = str(profilo_corr.get("email", "")).strip().lower()
@@ -52,7 +53,7 @@ def applica_stile_interfaccia_utente():
     st.markdown(
         """
         <style>
-        /* Sidebar sinistra ultra-compatta (175px) così il tasto Esci è sempre visibile senza comprimere la tabella */
+        /* Sidebar sinistra ultra-compatta (175px) */
         section[data-testid="stSidebar"] {
             width: 175px !important;
             min-width: 175px !important;
@@ -109,7 +110,6 @@ def applica_stile_interfaccia_utente():
             white-space: nowrap !important;
         }
 
-        /* Adattamento uniforme per tutte le tabelle dati Streamlit */
         [data-testid="stDataFrame"] {
             width: 100% !important;
             max-width: 100% !important;
@@ -123,14 +123,16 @@ def applica_stile_interfaccia_utente():
         st.markdown(
             """
             <style>
-            /* Nasconde toolbar in alto a destra (Share, GitHub, menu 3 puntini) */
+            /* Nasconde toolbar in alto a destra */
             [data-testid="stToolbar"],
             [data-testid="stToolbarActions"],
             [data-testid="stDecoration"],
             [data-testid="stStatusWidget"],
             #MainMenu,
             .stAppDeployButton,
-            /* Nasconde coroncina rossa / badge Streamlit Cloud in basso a destra */
+            /* Nasconde ogni badge/coroncina esterna di Streamlit Cloud in basso a destra */
+            body > div:not(#root),
+            #root ~ div,
             footer,
             [data-testid="stFooter"],
             [data-testid="manage-app-button"],
@@ -152,7 +154,6 @@ def applica_stile_interfaccia_utente():
             header[data-testid="stHeader"] {
                 background: transparent !important;
             }
-            /* Mantiene visibili i pulsanti per aprire/chiudere la sidebar */
             [data-testid="stSidebarCollapseButton"],
             [data-testid="stExpandSidebarButton"],
             [data-testid="stSidebarCollapsedControl"],
@@ -165,6 +166,46 @@ def applica_stile_interfaccia_utente():
             </style>
             """,
             unsafe_allow_html=True
+        )
+
+        # Rimozione diretta via DOM sul documento padre per il badge esterno di Streamlit Cloud
+        components.html(
+            """
+            <script>
+            (function() {
+                function nascondiBadgeStreamlit() {
+                    try {
+                        const doc = window.parent.document;
+                        const selettori = [
+                            'body > div:not(#root)',
+                            '#root ~ div',
+                            '[class*="viewerBadge"]',
+                            '[class*="profileContainer"]',
+                            '[class*="profilePreview"]',
+                            '[data-testid="manage-app-button"]',
+                            'a[href*="streamlit.io"]',
+                            'img[alt="App Creator Avatar"]'
+                        ];
+                        selettori.forEach(sel => {
+                            doc.querySelectorAll(sel).forEach(el => {
+                                el.style.setProperty('display', 'none', 'important');
+                                el.style.setProperty('visibility', 'hidden', 'important');
+                                el.style.setProperty('opacity', '0', 'important');
+                            });
+                        });
+                    } catch (e) {}
+                }
+                nascondiBadgeStreamlit();
+                const observer = new MutationObserver(nascondiBadgeStreamlit);
+                try {
+                    observer.observe(window.parent.document.body, { childList: true, subtree: true });
+                } catch (e) {}
+                setInterval(nascondiBadgeStreamlit, 800);
+            })();
+            </script>
+            """,
+            height=0,
+            width=0
         )
 
 # --- FILTRO FILIALI CONSENTITE (PER ADMIN E FILIALI MULTI-SEDE) ---
