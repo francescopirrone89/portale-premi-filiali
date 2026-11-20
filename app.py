@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="Portale Premi Filiali",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 COLONNE_FILIALE = [
@@ -52,47 +52,47 @@ def applica_stile_interfaccia_utente():
     st.markdown(
         """
         <style>
-        /* Sidebar sinistra compatta */
+        /* Sidebar sinistra ultra-compatta (175px) così il tasto Esci è sempre visibile senza comprimere la tabella */
         section[data-testid="stSidebar"] {
-            width: 210px !important;
-            min-width: 210px !important;
-            max-width: 210px !important;
+            width: 175px !important;
+            min-width: 175px !important;
+            max-width: 175px !important;
         }
         section[data-testid="stSidebar"] > div:first-child {
-            width: 210px !important;
+            width: 175px !important;
             padding-top: 1.2rem !important;
-            padding-left: 0.7rem !important;
-            padding-right: 0.7rem !important;
+            padding-left: 0.55rem !important;
+            padding-right: 0.55rem !important;
         }
         section[data-testid="stSidebar"] p,
         section[data-testid="stSidebar"] span,
         section[data-testid="stSidebar"] div {
-            font-size: 0.84rem !important;
+            font-size: 0.8rem !important;
             word-break: break-word !important;
         }
 
         /* Ottimizzazione spazi e margini del contenitore principale su tutte le risoluzioni */
         .block-container {
-            padding-top: 2.2rem !important;
-            padding-left: clamp(0.45rem, 1.2vw, 1.4rem) !important;
-            padding-right: clamp(0.45rem, 1.2vw, 1.4rem) !important;
+            padding-top: 1.6rem !important;
+            padding-left: clamp(0.4rem, 1vw, 1.2rem) !important;
+            padding-right: clamp(0.4rem, 1vw, 1.2rem) !important;
             padding-bottom: 1.5rem !important;
             max-width: 100% !important;
         }
 
         /* Titoli e metriche adattivi alla risoluzione */
         h1 {
-            font-size: clamp(1.3rem, 2.1vw, 1.95rem) !important;
+            font-size: clamp(1.25rem, 1.9vw, 1.85rem) !important;
             margin-bottom: 0.35rem !important;
         }
         h2, h3 {
-            font-size: clamp(1.05rem, 1.5vw, 1.35rem) !important;
+            font-size: clamp(1rem, 1.4vw, 1.3rem) !important;
         }
         [data-testid="stMetricValue"] {
-            font-size: clamp(1.15rem, 1.8vw, 1.7rem) !important;
+            font-size: clamp(1.1rem, 1.7vw, 1.65rem) !important;
         }
         [data-testid="stMetricLabel"] {
-            font-size: clamp(0.76rem, 0.95vw, 0.9rem) !important;
+            font-size: clamp(0.75rem, 0.9vw, 0.88rem) !important;
         }
 
         /* Tab navigabili senza tagli anche su schermi piccoli */
@@ -104,8 +104,8 @@ def applica_stile_interfaccia_utente():
             padding-bottom: 4px;
         }
         .stTabs [data-baseweb="tab"] {
-            font-size: clamp(11.5px, 0.95vw, 14px) !important;
-            padding: 6px 10px !important;
+            font-size: clamp(11px, 0.9vw, 13.5px) !important;
+            padding: 6px 9px !important;
             white-space: nowrap !important;
         }
 
@@ -123,14 +123,14 @@ def applica_stile_interfaccia_utente():
         st.markdown(
             """
             <style>
-            /* Nasconde toolbar in alto a destra (Share, GitHub, menu 3 puntini) mantenendo il tasto per aprire la sidebar a sinistra */
+            /* Nasconde toolbar in alto a destra (Share, GitHub, menu 3 puntini) */
             [data-testid="stToolbar"],
             [data-testid="stToolbarActions"],
             [data-testid="stDecoration"],
             [data-testid="stStatusWidget"],
             #MainMenu,
             .stAppDeployButton,
-            /* Nasconde coroncina/badge Streamlit Cloud in basso a destra */
+            /* Nasconde coroncina rossa / badge Streamlit Cloud in basso a destra */
             footer,
             [data-testid="stFooter"],
             [data-testid="manage-app-button"],
@@ -138,16 +138,23 @@ def applica_stile_interfaccia_utente():
             [class*="profileContainer"],
             [class*="profilePreview"],
             [class*="StatusWidget"],
-            a[href*="streamlit.io"] {
+            div[class^="_container_"],
+            div[class^="_profile"],
+            a[href*="streamlit.io"],
+            img[alt="App Creator Avatar"] {
                 display: none !important;
                 visibility: hidden !important;
                 opacity: 0 !important;
+                width: 0 !important;
+                height: 0 !important;
                 pointer-events: none !important;
             }
             header[data-testid="stHeader"] {
                 background: transparent !important;
             }
-            /* Rende ben visibile la freccetta per aprire la barra laterale sinistra (dove c'è il Logout) */
+            /* Mantiene visibili i pulsanti per aprire/chiudere la sidebar */
+            [data-testid="stSidebarCollapseButton"],
+            [data-testid="stExpandSidebarButton"],
             [data-testid="stSidebarCollapsedControl"],
             [data-testid="collapsedControl"] {
                 display: flex !important;
@@ -472,14 +479,14 @@ def render_tabella_excel_unita_html(dati_tab):
     html = (
         '<style>'
         '.ex-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; width: 100%; max-width: 100%; display: block; }'
-        '.ex-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(9.5px, 0.78vw, 13px); }'
-        '.ex-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(3px, 0.35vw, 6px) clamp(3px, 0.45vw, 8px); border: 1px solid #7f9c6b; white-space: normal; line-height: 1.15; }'
-        '.ex-table td { padding: clamp(3px, 0.35vw, 6px) clamp(3px, 0.45vw, 8px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); white-space: nowrap; }'
+        '.ex-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(9px, 0.72vw, 13px); }'
+        '.ex-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(3px, 0.3vw, 6px) clamp(2px, 0.35vw, 7px); border: 1px solid #7f9c6b; white-space: normal; line-height: 1.15; }'
+        '.ex-table td { padding: clamp(3px, 0.3vw, 6px) clamp(2px, 0.35vw, 7px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); white-space: nowrap; }'
         '.ex-table td.first-col { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
         '.ex-table td.text-col { text-align: center; }'
         '.ex-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
-        '@media (max-width: 1366px) {'
-        '  .ex-table td.first-col { max-width: 135px; overflow: hidden; text-overflow: ellipsis; }'
+        '@media (max-width: 1440px) {'
+        '  .ex-table td.first-col { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }'
         '}'
         '</style>'
         '<div class="ex-wrapper"><table class="ex-table"><thead>'
@@ -805,20 +812,20 @@ def calcola_classifica_incidenza_operatori(records_filtrati):
 
     return sorted(risultati, key=lambda x: x["Incidenza (%)"], reverse=True)
 
-# --- RENDERING GRAFICO (ADATTIVO A QUALSIASI RISOLUZIONE SENZA SCROLL DESTRO) ---
+# --- RENDERING GRAFICO (ADATTIVO A QUALSIASI RISOLUZIONE ANCHE CON SIDEBAR APERTA) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
         '.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; width: 100%; max-width: 100%; display: block; }'
-        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(9.5px, 0.78vw, 13px); }'
-        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(3px, 0.35vw, 6px) clamp(2px, 0.4vw, 8px); border: 1px solid #7f9c6b; white-space: normal; line-height: 1.15; }'
-        '.premi-table td { padding: clamp(3px, 0.35vw, 6px) clamp(2px, 0.4vw, 8px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); white-space: nowrap; }'
+        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(9px, 0.72vw, 13px); }'
+        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(3px, 0.3vw, 6px) clamp(2px, 0.35vw, 7px); border: 1px solid #7f9c6b; white-space: normal; line-height: 1.15; }'
+        '.premi-table td { padding: clamp(3px, 0.3vw, 6px) clamp(2px, 0.35vw, 7px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); white-space: nowrap; }'
         '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
         '.premi-table td.col-tot { background-color: light-dark(#eef5e9, #1d2633); font-weight: 600; }'
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
-        '@media (max-width: 1366px) {'
-        '  .premi-table td.op-cell { max-width: 135px; overflow: hidden; text-overflow: ellipsis; }'
+        '@media (max-width: 1440px) {'
+        '  .premi-table td.op-cell { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }'
         '}'
         '</style>'
         '<div class="table-wrapper"><table class="premi-table"><thead>'
