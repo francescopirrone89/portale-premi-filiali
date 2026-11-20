@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="Portale Premi Filiali",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 COLONNE_FILIALE = [
@@ -49,18 +49,17 @@ def applica_stile_interfaccia_utente():
     email_corr = str(profilo_corr.get("email", "")).strip().lower()
     is_owner = (email_corr == EMAIL_SUPER_OWNER)
 
-    # CSS comune per adattare il layout a qualsiasi risoluzione (anche 1366x768 o zoom 125%-150%)
     st.markdown(
         """
         <style>
-        /* Sidebar sinistra più stretta e compatta */
+        /* Sidebar sinistra compatta */
         section[data-testid="stSidebar"] {
-            width: 215px !important;
-            min-width: 215px !important;
-            max-width: 215px !important;
+            width: 210px !important;
+            min-width: 210px !important;
+            max-width: 210px !important;
         }
         section[data-testid="stSidebar"] > div:first-child {
-            width: 215px !important;
+            width: 210px !important;
             padding-top: 1.2rem !important;
             padding-left: 0.75rem !important;
             padding-right: 0.75rem !important;
@@ -75,8 +74,8 @@ def applica_stile_interfaccia_utente():
         /* Ottimizzazione spazi e margini del contenitore principale su tutte le risoluzioni */
         .block-container {
             padding-top: 2.2rem !important;
-            padding-left: clamp(0.75rem, 2vw, 2rem) !important;
-            padding-right: clamp(0.75rem, 2vw, 2rem) !important;
+            padding-left: clamp(0.65rem, 1.8vw, 1.8rem) !important;
+            padding-right: clamp(0.65rem, 1.8vw, 1.8rem) !important;
             padding-bottom: 1.5rem !important;
             max-width: 100% !important;
         }
@@ -109,12 +108,17 @@ def applica_stile_interfaccia_utente():
             padding: 6px 10px !important;
             white-space: nowrap !important;
         }
+
+        /* Adattamento uniforme per tutte le tabelle dati Streamlit */
+        [data-testid="stDataFrame"] {
+            width: 100% !important;
+            max-width: 100% !important;
+        }
         </style>
         """,
         unsafe_allow_html=True
     )
 
-    # Nasconde barre/icone Streamlit Cloud a tutti tranne francesco.pirrone@sbc.it
     if not is_owner:
         st.markdown(
             """
@@ -456,13 +460,16 @@ def render_tabella_excel_unita_html(dati_tab):
 
     html = (
         '<style>'
-        '.ex-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
-        '.ex-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(11px, 0.9vw, 13px); white-space: nowrap; }'
-        '.ex-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 6px 8px; border: 1px solid #7f9c6b; }'
-        '.ex-table td { padding: 6px 8px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
+        '.ex-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; width: 100%; max-width: 100%; display: block; }'
+        '.ex-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(11px, 0.85vw, 13px); white-space: nowrap; }'
+        '.ex-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(4px, 0.45vw, 7px) clamp(5px, 0.6vw, 9px); border: 1px solid #7f9c6b; }'
+        '.ex-table td { padding: clamp(4px, 0.45vw, 7px) clamp(5px, 0.6vw, 9px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
         '.ex-table td.first-col { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
         '.ex-table td.text-col { text-align: center; }'
         '.ex-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
+        '@media (max-width: 1200px) {'
+        '  .ex-table td.first-col { max-width: 145px; overflow: hidden; text-overflow: ellipsis; }'
+        '}'
         '</style>'
         '<div class="ex-wrapper"><table class="ex-table"><thead>'
     )
@@ -791,16 +798,16 @@ def calcola_classifica_incidenza_operatori(records_filtrati):
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        '.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; width: 100%; }'
-        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(11px, 0.88vw, 13px); white-space: nowrap; }'
-        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(4px, 0.5vw, 7px) clamp(5px, 0.65vw, 10px); border: 1px solid #7f9c6b; }'
-        '.premi-table td { padding: clamp(4px, 0.5vw, 7px) clamp(5px, 0.65vw, 10px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
+        '.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; width: 100%; max-width: 100%; display: block; }'
+        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(11px, 0.85vw, 13px); white-space: nowrap; }'
+        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(4px, 0.45vw, 7px) clamp(5px, 0.6vw, 9px); border: 1px solid #7f9c6b; }'
+        '.premi-table td { padding: clamp(4px, 0.45vw, 7px) clamp(5px, 0.6vw, 9px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
         '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
         '.premi-table td.col-tot { background-color: light-dark(#eef5e9, #1d2633); font-weight: 600; }'
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
-        '@media (max-width: 1100px) {'
-        '  .premi-table td.op-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }'
+        '@media (max-width: 1200px) {'
+        '  .premi-table td.op-cell { max-width: 145px; overflow: hidden; text-overflow: ellipsis; }'
         '}'
         '</style>'
         '<div class="table-wrapper"><table class="premi-table"><thead>'
@@ -1236,7 +1243,7 @@ else:
             fil_lbl = str(profilo.get("nome_scheda_excel") or "TUTTE").strip()
             st.write(f"Filiale/i: **{fil_lbl}**")
         st.divider()
-        if st.button("🚪 Esci", key="sidebar_logout", use_container_width=True):
+        if st.button("Esci (Logout)", key="sidebar_logout", use_container_width=True):
             logout()
 
     # ==========================================
@@ -1246,12 +1253,7 @@ else:
         is_super = (ruolo == "super_admin")
         filiali_consentite = None if is_super else get_filiali_consentite_utente(profilo)
 
-        col_head, col_out = st.columns([5, 1])
-        with col_head:
-            st.title("🛠️ Pannello Super Amministrazione" if is_super else "🛠️ Pannello Amministrazione")
-        with col_out:
-            if st.button("🚪 Esci", key="top_logout_admin", use_container_width=True):
-                logout()
+        st.title("🛠️ Pannello Super Amministrazione" if is_super else "🛠️ Pannello Amministrazione")
 
         if not is_super and must_change:
             render_cambio_password_obbligatorio(profilo)
@@ -1566,12 +1568,7 @@ else:
             else:
                 mia_scheda = st.selectbox("Seleziona la filiale da consultare:", lista_mie_schede, key="filiale_multi_select")
 
-            col_fil_tit, col_fil_out = st.columns([5, 1])
-            with col_fil_tit:
-                st.title(f"📊 Riepilogo Premi - {mia_scheda}")
-            with col_fil_out:
-                if st.button("🚪 Esci", key="top_logout_filiale", use_container_width=True):
-                    logout()
+            st.title(f"📊 Riepilogo Premi - {mia_scheda}")
 
             dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
             
