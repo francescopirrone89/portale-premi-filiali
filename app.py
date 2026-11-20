@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import openpyxl
 from supabase import create_client
@@ -43,8 +42,10 @@ if "profilo" not in st.session_state:
     st.session_state.profilo = None
 if "log_accesso_id" not in st.session_state:
     st.session_state.log_accesso_id = None
+if "login_error" not in st.session_state:
+    st.session_state.login_error = ""
 
-# --- STILE RESPONSIVE UNIVERSALE + SIDEBAR COMPATTA + RIMOZIONE BADGE STREAMLIT ---
+# --- STILE RESPONSIVE UNIVERSALE + SIDEBAR COMPATTA + VISIBILITÀ BARRE ---
 def applica_stile_interfaccia_utente():
     profilo_corr = st.session_state.get("profilo") or {}
     email_corr = str(profilo_corr.get("email", "")).strip().lower()
@@ -123,16 +124,12 @@ def applica_stile_interfaccia_utente():
         st.markdown(
             """
             <style>
-            /* Nasconde toolbar in alto a destra */
             [data-testid="stToolbar"],
             [data-testid="stToolbarActions"],
             [data-testid="stDecoration"],
             [data-testid="stStatusWidget"],
             #MainMenu,
             .stAppDeployButton,
-            /* Nasconde ogni badge/coroncina esterna di Streamlit Cloud in basso a destra */
-            body > div:not(#root),
-            #root ~ div,
             footer,
             [data-testid="stFooter"],
             [data-testid="manage-app-button"],
@@ -140,15 +137,10 @@ def applica_stile_interfaccia_utente():
             [class*="profileContainer"],
             [class*="profilePreview"],
             [class*="StatusWidget"],
-            div[class^="_container_"],
-            div[class^="_profile"],
-            a[href*="streamlit.io"],
-            img[alt="App Creator Avatar"] {
+            a[href*="streamlit.io"] {
                 display: none !important;
                 visibility: hidden !important;
                 opacity: 0 !important;
-                width: 0 !important;
-                height: 0 !important;
                 pointer-events: none !important;
             }
             header[data-testid="stHeader"] {
@@ -166,46 +158,6 @@ def applica_stile_interfaccia_utente():
             </style>
             """,
             unsafe_allow_html=True
-        )
-
-        # Rimozione diretta via DOM sul documento padre per il badge esterno di Streamlit Cloud
-        components.html(
-            """
-            <script>
-            (function() {
-                function nascondiBadgeStreamlit() {
-                    try {
-                        const doc = window.parent.document;
-                        const selettori = [
-                            'body > div:not(#root)',
-                            '#root ~ div',
-                            '[class*="viewerBadge"]',
-                            '[class*="profileContainer"]',
-                            '[class*="profilePreview"]',
-                            '[data-testid="manage-app-button"]',
-                            'a[href*="streamlit.io"]',
-                            'img[alt="App Creator Avatar"]'
-                        ];
-                        selettori.forEach(sel => {
-                            doc.querySelectorAll(sel).forEach(el => {
-                                el.style.setProperty('display', 'none', 'important');
-                                el.style.setProperty('visibility', 'hidden', 'important');
-                                el.style.setProperty('opacity', '0', 'important');
-                            });
-                        });
-                    } catch (e) {}
-                }
-                nascondiBadgeStreamlit();
-                const observer = new MutationObserver(nascondiBadgeStreamlit);
-                try {
-                    observer.observe(window.parent.document.body, { childList: true, subtree: true });
-                } catch (e) {}
-                setInterval(nascondiBadgeStreamlit, 800);
-            })();
-            </script>
-            """,
-            height=0,
-            width=0
         )
 
 # --- FILTRO FILIALI CONSENTITE (PER ADMIN E FILIALI MULTI-SEDE) ---
@@ -1256,39 +1208,47 @@ def render_sezione_log_accessi():
         file_name="Log_Accessi_Portale.xlsx"
     )
 
-# --- AUTH ---
-def login(email, password):
+# --- AUTH (CON PULIZIA COMPLETA DEL CONTENITORE DI LOGIN PER EVITARE SOVRAPPOSIZIONI GRAFICHE) ---
+def esegui_login_callback():
+    em = str(st.session_state.get("login_email_input", "")).strip()
+    pw = str(st.session_state.get("login_password_input", ""))
     try:
-        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        st.session_state.user = res.user
+        res = supabase.auth.sign_in_with_password({"email": em, "password": pw})
         profilo_data = supabase.table("profili_filiali").select("*").eq("id", res.user.id).single().execute().data
+        st.session_state.user = res.user
         st.session_state.profilo = profilo_data
+        st.session_state.login_error = ""
         registra_log_ingresso(res.user, profilo_data)
-        st.rerun()
     except Exception:
-        st.error("Credenziali non valide o profilo non configurato.")
+        st.session_state.login_error = "Credenziali non valide o profilo non configurato."
 
 def logout():
     registra_log_uscita()
     supabase.auth.sign_out()
     st.session_state.user = None
     st.session_state.profilo = None
+    st.session_state.login_error = ""
     st.rerun()
 
 # Applica subito stile responsive e regole di visibilità
 applica_stile_interfaccia_utente()
 
+contenitore_principale = st.empty()
+
 if not st.session_state.user:
-    _, col2, _ = st.columns([1, 1.5, 1])
-    with col2:
-        st.title("📊 Portale Riepilogo Premi")
-        st.markdown("Accedi con le tue credenziali aziendali per visualizzare i dati della tua filiale.")
-        with st.form("login_form"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            if st.form_submit_button("Accedi", use_container_width=True):
-                login(email, password)
+    with contenitore_principale.container():
+        _, col2, _ = st.columns([1, 1.5, 1])
+        with col2:
+            st.title("📊 Portale Riepilogo Premi")
+            st.markdown("Accedi con le tue credenziali aziendali per visualizzare i dati della tua filiale.")
+            with st.form("login_form"):
+                st.text_input("Email", key="login_email_input")
+                st.text_input("Password", type="password", key="login_password_input")
+                st.form_submit_button("Accedi", use_container_width=True, on_click=esegui_login_callback)
+            if st.session_state.login_error:
+                st.error(st.session_state.login_error)
 else:
+    contenitore_principale.empty()
     profilo = st.session_state.profilo
     ruolo = str(profilo.get("ruolo", "filiale")).strip().lower()
     email_corrente = str(profilo.get("email", "")).strip().lower()
