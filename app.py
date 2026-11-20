@@ -54,12 +54,12 @@ def applica_stile_interfaccia_utente():
         <style>
         /* Sidebar sinistra compatta */
         section[data-testid="stSidebar"] {
-            width: 205px !important;
-            min-width: 205px !important;
-            max-width: 205px !important;
+            width: 210px !important;
+            min-width: 210px !important;
+            max-width: 210px !important;
         }
         section[data-testid="stSidebar"] > div:first-child {
-            width: 205px !important;
+            width: 210px !important;
             padding-top: 1.2rem !important;
             padding-left: 0.7rem !important;
             padding-right: 0.7rem !important;
@@ -73,7 +73,7 @@ def applica_stile_interfaccia_utente():
 
         /* Ottimizzazione spazi e margini del contenitore principale su tutte le risoluzioni */
         .block-container {
-            padding-top: 2rem !important;
+            padding-top: 2.2rem !important;
             padding-left: clamp(0.45rem, 1.2vw, 1.4rem) !important;
             padding-right: clamp(0.45rem, 1.2vw, 1.4rem) !important;
             padding-bottom: 1.5rem !important;
@@ -123,26 +123,37 @@ def applica_stile_interfaccia_utente():
         st.markdown(
             """
             <style>
+            /* Nasconde toolbar in alto a destra (Share, GitHub, menu 3 puntini) mantenendo il tasto per aprire la sidebar a sinistra */
             [data-testid="stToolbar"],
             [data-testid="stToolbarActions"],
             [data-testid="stDecoration"],
             [data-testid="stStatusWidget"],
             #MainMenu,
-            header[data-testid="stHeader"] button:not([data-testid="stSidebarCollapseButton"]):not([data-testid="baseButton-headerNoPadding"]),
-            header[data-testid="stHeader"] a,
+            .stAppDeployButton,
+            /* Nasconde coroncina/badge Streamlit Cloud in basso a destra */
             footer,
             [data-testid="stFooter"],
             [data-testid="manage-app-button"],
-            .stAppDeployButton,
-            div[class*="viewerBadge"],
-            div[class*="StatusWidget"],
-            iframe[title*="streamlit"] {
+            [class*="viewerBadge"],
+            [class*="profileContainer"],
+            [class*="profilePreview"],
+            [class*="StatusWidget"],
+            a[href*="streamlit.io"] {
                 display: none !important;
                 visibility: hidden !important;
+                opacity: 0 !important;
                 pointer-events: none !important;
             }
             header[data-testid="stHeader"] {
                 background: transparent !important;
+            }
+            /* Rende ben visibile la freccetta per aprire la barra laterale sinistra (dove c'è il Logout) */
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="collapsedControl"] {
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                pointer-events: auto !important;
             }
             </style>
             """,
