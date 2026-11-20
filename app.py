@@ -6,7 +6,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import io
 
-st.set_page_config(page_title="Portale Premi Filiali", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="Portale Premi Filiali",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 COLONNE_FILIALE = [
     "Operatore",
@@ -38,12 +43,78 @@ if "profilo" not in st.session_state:
 if "log_accesso_id" not in st.session_state:
     st.session_state.log_accesso_id = None
 
-# --- NASCONDE BARRA SUPERIORE E FOOTER/MANAGE APP A TUTTI TRANNE francesco.pirrone@sbc.it ---
+# --- STILE RESPONSIVE UNIVERSALE + SIDEBAR COMPATTA + VISIBILITÀ BARRE ---
 def applica_stile_interfaccia_utente():
     profilo_corr = st.session_state.get("profilo") or {}
     email_corr = str(profilo_corr.get("email", "")).strip().lower()
     is_owner = (email_corr == EMAIL_SUPER_OWNER)
 
+    # CSS comune per adattare il layout a qualsiasi risoluzione (anche 1366x768 o zoom 125%-150%)
+    st.markdown(
+        """
+        <style>
+        /* Sidebar sinistra più stretta e compatta */
+        section[data-testid="stSidebar"] {
+            width: 215px !important;
+            min-width: 215px !important;
+            max-width: 215px !important;
+        }
+        section[data-testid="stSidebar"] > div:first-child {
+            width: 215px !important;
+            padding-top: 1.2rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] span,
+        section[data-testid="stSidebar"] div {
+            font-size: 0.85rem !important;
+            word-break: break-word !important;
+        }
+
+        /* Ottimizzazione spazi e margini del contenitore principale su tutte le risoluzioni */
+        .block-container {
+            padding-top: 2.2rem !important;
+            padding-left: clamp(0.75rem, 2vw, 2rem) !important;
+            padding-right: clamp(0.75rem, 2vw, 2rem) !important;
+            padding-bottom: 1.5rem !important;
+            max-width: 100% !important;
+        }
+
+        /* Titoli e metriche adattivi alla risoluzione */
+        h1 {
+            font-size: clamp(1.35rem, 2.2vw, 2rem) !important;
+            margin-bottom: 0.4rem !important;
+        }
+        h2, h3 {
+            font-size: clamp(1.05rem, 1.6vw, 1.4rem) !important;
+        }
+        [data-testid="stMetricValue"] {
+            font-size: clamp(1.2rem, 1.9vw, 1.75rem) !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: clamp(0.78rem, 1vw, 0.92rem) !important;
+        }
+
+        /* Tab navigabili senza tagli anche su schermi piccoli */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 4px !important;
+            overflow-x: auto !important;
+            flex-wrap: nowrap !important;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 4px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            font-size: clamp(11.5px, 1vw, 14px) !important;
+            padding: 6px 10px !important;
+            white-space: nowrap !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Nasconde barre/icone Streamlit Cloud a tutti tranne francesco.pirrone@sbc.it
     if not is_owner:
         st.markdown(
             """
@@ -53,7 +124,7 @@ def applica_stile_interfaccia_utente():
             [data-testid="stDecoration"],
             [data-testid="stStatusWidget"],
             #MainMenu,
-            header[data-testid="stHeader"] button,
+            header[data-testid="stHeader"] button:not([data-testid="stSidebarCollapseButton"]):not([data-testid="baseButton-headerNoPadding"]),
             header[data-testid="stHeader"] a,
             footer,
             [data-testid="stFooter"],
@@ -386,16 +457,12 @@ def render_tabella_excel_unita_html(dati_tab):
     html = (
         '<style>'
         '.ex-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
-        '.ex-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
-        '.ex-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
-        '.ex-table td { padding: 7px 10px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
+        '.ex-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(11px, 0.9vw, 13px); white-space: nowrap; }'
+        '.ex-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 6px 8px; border: 1px solid #7f9c6b; }'
+        '.ex-table td { padding: 6px 8px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
         '.ex-table td.first-col { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
         '.ex-table td.text-col { text-align: center; }'
         '.ex-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
-        '@media (max-width: 768px) {'
-        '  .ex-table { font-size: 11px; }'
-        '  .ex-table th, .ex-table td { padding: 5px 6px; }'
-        '}'
         '</style>'
         '<div class="ex-wrapper"><table class="ex-table"><thead>'
     )
@@ -720,22 +787,20 @@ def calcola_classifica_incidenza_operatori(records_filtrati):
 
     return sorted(risultati, key=lambda x: x["Incidenza (%)"], reverse=True)
 
-# --- RENDERING GRAFICO (ADATTIVO NATIVO CON light-dark() + RESPONSIVE MOBILE) ---
+# --- RENDERING GRAFICO (ADATTIVO NATIVO CON light-dark() + RESPONSIVE A QUALSIASI RISOLUZIONE) ---
 def genera_tabella_html_unita(df):
     html = (
         '<style>'
-        '.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; }'
-        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: 13px; white-space: nowrap; }'
-        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: 7px 10px; border: 1px solid #7f9c6b; }'
-        '.premi-table td { padding: 7px 10px; border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
+        '.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 8px; border: 1px solid light-dark(#c5cad3, #3a3f4b); margin: 8px 0 16px 0; width: 100%; }'
+        '.premi-table { width: 100%; border-collapse: collapse; font-family: "Segoe UI", sans-serif; font-size: clamp(11px, 0.88vw, 13px); white-space: nowrap; }'
+        '.premi-table th { background-color: #c6e0b4; color: #111111; font-weight: 700; text-align: center; padding: clamp(4px, 0.5vw, 7px) clamp(5px, 0.65vw, 10px); border: 1px solid #7f9c6b; }'
+        '.premi-table td { padding: clamp(4px, 0.5vw, 7px) clamp(5px, 0.65vw, 10px); border: 1px solid light-dark(#d0d7de, #3a3f4b); text-align: right; color: light-dark(#111111, #f0f2f6); background-color: light-dark(#ffffff, #0e1117); }'
         '.premi-table td.op-cell { text-align: left; font-weight: 600; position: sticky; left: 0; background-color: light-dark(#f6f8fa, #1e222b); color: light-dark(#111111, #f0f2f6); z-index: 1; }'
         '.premi-table td.col-tot { background-color: light-dark(#eef5e9, #1d2633); font-weight: 600; }'
         '.premi-table tr.totale-row td { background-color: #d9ead3 !important; color: #111111 !important; font-weight: 700; border-top: 2px solid #5b7a47; }'
         '.premi-table tr.totale-row td.premio-cell { background-color: #f4cccc !important; color: #111111 !important; }'
-        '@media (max-width: 768px) {'
-        '  .premi-table { font-size: 11px; }'
-        '  .premi-table th, .premi-table td { padding: 5px 6px; }'
-        '  .premi-table td.op-cell { max-width: 115px; overflow: hidden; text-overflow: ellipsis; }'
+        '@media (max-width: 1100px) {'
+        '  .premi-table td.op-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }'
         '}'
         '</style>'
         '<div class="table-wrapper"><table class="premi-table"><thead>'
@@ -1144,7 +1209,7 @@ def logout():
     st.session_state.profilo = None
     st.rerun()
 
-# Applica subito le regole di visibilità barra superiore/inferiore in base all'utente connesso
+# Applica subito stile responsive e regole di visibilità
 applica_stile_interfaccia_utente()
 
 if not st.session_state.user:
@@ -1171,7 +1236,7 @@ else:
             fil_lbl = str(profilo.get("nome_scheda_excel") or "TUTTE").strip()
             st.write(f"Filiale/i: **{fil_lbl}**")
         st.divider()
-        if st.button("Esci (Logout)", use_container_width=True):
+        if st.button("🚪 Esci", key="sidebar_logout", use_container_width=True):
             logout()
 
     # ==========================================
@@ -1181,49 +1246,12 @@ else:
         is_super = (ruolo == "super_admin")
         filiali_consentite = None if is_super else get_filiali_consentite_utente(profilo)
 
-        st.markdown(
-            """
-            <style>
-            @media (min-width: 769px) {
-                .admin-mobile-bar { display: none !important; }
-            }
-            @media (max-width: 768px) {
-                .block-container {
-                    padding-top: 2.6rem !important;
-                    padding-left: 0.7rem !important;
-                    padding-right: 0.7rem !important;
-                    padding-bottom: 1.5rem !important;
-                }
-                h1 { font-size: 1.45rem !important; margin-bottom: 0.4rem !important; }
-                h2, h3 { font-size: 1.15rem !important; }
-                .stTabs [data-baseweb="tab-list"] {
-                    gap: 4px !important;
-                    overflow-x: auto !important;
-                    flex-wrap: nowrap !important;
-                    -webkit-overflow-scrolling: touch;
-                    padding-bottom: 4px;
-                }
-                .stTabs [data-baseweb="tab"] {
-                    font-size: 12px !important;
-                    padding: 6px 10px !important;
-                    white-space: nowrap !important;
-                }
-                [data-testid="stMetricValue"] { font-size: 1.35rem !important; }
-                [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-        col_head, col_mob_out = st.columns([4, 1])
+        col_head, col_out = st.columns([5, 1])
         with col_head:
             st.title("🛠️ Pannello Super Amministrazione" if is_super else "🛠️ Pannello Amministrazione")
-        with col_mob_out:
-            st.markdown('<div class="admin-mobile-bar">', unsafe_allow_html=True)
-            if st.button("🚪 Esci", key="mobile_logout_admin", use_container_width=True):
+        with col_out:
+            if st.button("🚪 Esci", key="top_logout_admin", use_container_width=True):
                 logout()
-            st.markdown('</div>', unsafe_allow_html=True)
 
         if not is_super and must_change:
             render_cambio_password_obbligatorio(profilo)
@@ -1391,7 +1419,6 @@ else:
                             else:
                                 st.warning("La password deve avere almeno 6 caratteri.")
 
-                    # --- ASSEGNAZIONE / AGGIUNTA FILIALI PER QUALSIASI UTENTE (FILIALE O ADMIN) ---
                     utenti_assegnabili = [
                         u for u in utenti_res.data
                         if str(u.get("ruolo", "")).strip().lower() in ("filiale", "admin")
@@ -1539,7 +1566,13 @@ else:
             else:
                 mia_scheda = st.selectbox("Seleziona la filiale da consultare:", lista_mie_schede, key="filiale_multi_select")
 
-            st.title(f"📊 Riepilogo Premi - {mia_scheda}")
+            col_fil_tit, col_fil_out = st.columns([5, 1])
+            with col_fil_tit:
+                st.title(f"📊 Riepilogo Premi - {mia_scheda}")
+            with col_fil_out:
+                if st.button("🚪 Esci", key="top_logout_filiale", use_container_width=True):
+                    logout()
+
             dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
             
             if dati_res.data:
