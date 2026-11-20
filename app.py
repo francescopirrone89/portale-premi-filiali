@@ -976,7 +976,7 @@ def render_sezione_anteprima(is_super_admin, filiali_consentite=None):
     if tutti:
         mesi = list(dict.fromkeys([r["mese_riferimento"] for r in tutti]))
         if is_super_admin:
-            cm1, cm2 = st.columns([3, 1])
+            cm1, cm2 = st.columns([3, 1], vertical_alignment="bottom")
             mese_sel = cm1.selectbox("Seleziona periodo", mesi)
             if cm2.button("🗑️ Elimina intero mese", use_container_width=True):
                 admin_client.table("dati_premi").delete().eq("mese_riferimento", mese_sel).execute()
@@ -1162,7 +1162,7 @@ def render_sezione_log_accessi():
 
     df_logs = pd.DataFrame(logs)
 
-    col_l1, col_l2, col_l3 = st.columns([1.5, 1.5, 1])
+    col_l1, col_l2, col_l3 = st.columns([1.5, 1.5, 1], vertical_alignment="bottom")
     utenti_unici = ["Tutti gli utenti"] + sorted(list(set(df_logs["email"].dropna().tolist())))
     date_uniche = ["Tutte le date"] + sorted(list(set(df_logs["data_accesso"].astype(str).dropna().tolist())), reverse=True)
 
@@ -1171,8 +1171,6 @@ def render_sezione_log_accessi():
     with col_l2:
         filtro_data = st.selectbox("Filtra per Data Accesso:", date_uniche, key="log_fil_data")
     with col_l3:
-        st.write("")
-        st.write("")
         if st.button("🔄 Aggiorna Log", use_container_width=True):
             st.rerun()
 
@@ -1414,7 +1412,7 @@ else:
 
                 if utenti_res.data:
                     opzioni_pw = {f"{u['email']} ({u['nome_scheda_excel']})": u for u in utenti_res.data}
-                    col_p1, col_p2, col_p3 = st.columns([2, 1.5, 1])
+                    col_p1, col_p2, col_p3 = st.columns([2, 1.5, 1], vertical_alignment="bottom")
                     with col_p1:
                         utente_scelto_label = st.selectbox("Seleziona utente:", list(opzioni_pw.keys()), key="sel_utente_pw")
                         utente_scelto = opzioni_pw[utente_scelto_label]
@@ -1423,8 +1421,6 @@ else:
                     with col_p2:
                         nuova_pw_reset = st.text_input("Nuova password provvisoria (min. 6 caratteri)", key="input_nuova_pw")
                     with col_p3:
-                        st.write("")
-                        st.write("")
                         if st.button("Aggiorna Password", type="primary", use_container_width=True):
                             if len(nuova_pw_reset.strip()) >= 6:
                                 try:
@@ -1466,7 +1462,7 @@ else:
                             f"{u['email']} [{str(u.get('ruolo', '')).upper()}]": u
                             for u in utenti_assegnabili
                         }
-                        ca1, ca2, ca3 = st.columns([1.6, 2.4, 1])
+                        ca1, ca2, ca3 = st.columns([1.6, 2.4, 1], vertical_alignment="bottom")
                         with ca1:
                             ut_scelto_label = st.selectbox(
                                 "Seleziona Utente (Filiale o Admin):",
@@ -1495,8 +1491,6 @@ else:
                                 key=f"multi_fil_user_{ut_obj['id']}"
                             )
                         with ca3:
-                            st.write("")
-                            st.write("")
                             if st.button("Salva Filiali", type="primary", use_container_width=True, key=f"btn_save_fil_{ut_obj['id']}"):
                                 if not fil_scelte_ut and ut_ruolo != "admin":
                                     st.warning("Seleziona almeno una filiale per un utente Filiale.")
@@ -1519,7 +1513,7 @@ else:
                     altri = [u for u in utenti_res.data if u["id"] != st.session_state.user.id]
                     if altri:
                         opzioni = {f"{u['email']} ({u['nome_scheda_excel']})": u["id"] for u in altri}
-                        cd1, cd2 = st.columns([3, 1])
+                        cd1, cd2 = st.columns([3, 1], vertical_alignment="bottom")
                         u_del = cd1.selectbox("Rimuovi account", list(opzioni.keys()), label_visibility="collapsed")
                         if cd2.button("Elimina Utente", use_container_width=True):
                             admin_client.auth.admin.delete_user(opzioni[u_del])
