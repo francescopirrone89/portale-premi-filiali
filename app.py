@@ -1581,14 +1581,18 @@ else:
             else:
                 mia_scheda = st.selectbox("Seleziona la filiale da consultare:", lista_mie_schede, key="filiale_multi_select")
 
-            st.title(f"📊 Riepilogo Premi - {mia_scheda}")
-
             dati_res = supabase.table("dati_premi").select("mese_riferimento, dati_json").eq("nome_scheda", mia_scheda).order("id", desc=True).execute()
             
             if dati_res.data:
                 vista_filiale = st.radio("Modalità di consultazione:", ["📅 Dettaglio Mensile", "📊 Gran Totale Annuale"], horizontal=True)
                 
                 if vista_filiale == "📅 Dettaglio Mensile":
+                    col_fil_tit, col_fil_range = st.columns([2.2, 1])
+                    with col_fil_tit:
+                        st.title(f"📊 Riepilogo Premi - {mia_scheda}")
+                    with col_fil_range:
+                        render_tabella_range_aliquote()
+
                     mesi_disp = [r["mese_riferimento"] for r in dati_res.data]
                     mese_scelto = st.selectbox("Seleziona il periodo di riferimento:", mesi_disp)
                     rec = next(r for r in dati_res.data if r["mese_riferimento"] == mese_scelto)
@@ -1599,6 +1603,7 @@ else:
                             df_esp.to_excel(writer, index=False, sheet_name=mia_scheda[:31])
                         st.download_button("📥 Scarica questa scheda in Excel", data=buf.getvalue(), file_name=f"Premi_{mia_scheda}_{mese_scelto}.xlsx")
                 else:
+                    st.title(f"📊 Riepilogo Premi - {mia_scheda}")
                     mesi_disp = [r["mese_riferimento"] for r in dati_res.data]
                     mesi_sel_f = st.multiselect("Seleziona i mesi da sommare:", mesi_disp, default=mesi_disp)
                     if mesi_sel_f:
@@ -1612,4 +1617,5 @@ else:
                                     df_esp_ann.to_excel(writer, index=False, sheet_name=f"Totale_{mia_scheda}"[:31])
                                 st.download_button("📥 Scarica Gran Totale in Excel", data=buf_fa.getvalue(), file_name=f"GranTotale_{mia_scheda}.xlsx")
             else:
+                st.title(f"📊 Riepilogo Premi - {mia_scheda}")
                 st.info("Non sono ancora presenti dati pubblicati per questa filiale.")
